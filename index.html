@@ -138,6 +138,13 @@
 
     <div class="stats" id="stats"></div>
 
+    <div id="repoBanner" class="hidden" style="background:linear-gradient(135deg,#0a2540,#123f6d);color:#fff;border-radius:12px;padding:13px 16px;margin:2px 0 14px">
+      <div style="font-size:11px;letter-spacing:.13em;font-weight:800;opacity:.72">REPO ON THE MAP</div>
+      <div id="rbName" style="font-size:21px;font-weight:800;line-height:1.2;word-break:break-all"></div>
+      <div id="rbMeta" style="font-size:13px;opacity:.92;margin-top:2px"></div>
+      <div id="rbScan" class="hidden" style="margin-top:8px;font-size:13px;font-weight:700;border-radius:8px;padding:7px 10px"></div>
+    </div>
+
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px;align-items:center">
       <button class="btn ghost" id="dmFiles" type="button">🗂 File map</button>
       <button class="btn ghost" id="dmFlow" type="button">▶ App flow — functions &amp; clicks</button>
@@ -201,7 +208,7 @@ const S = {
   externals: new Map(), // file -> [bare imports]
   cycles: new Set(), selected: null,
   findings: [], paid: false, mode: "flow",
-  dataMode: "files", fileData: null, flowData: null,
+  dataMode: "files", fileData: null, flowData: null, repoSource: null, scanRepo: null,
   view: {x:0, y:0, w:1200, h:560}, layout: {nodes:new Map(), groups:[], W:1200, H:560}
 };
 const CODE_EXT = /\.(js|jsx|ts|tsx|mjs|cjs|py|rb|php|go|java|cs|rs|c|cpp|h|vue|svelte|html|htm)$/i;
@@ -476,16 +483,46 @@ function applyDataset(){
   $("dmFlow").classList.toggle("ghost", S.dataMode !== "flow");
   $("dmHint").textContent = S.dataMode === "flow" ? "How the app actually runs: user actions → the functions they trigger → the functions those call." : "How the files import and depend on each other.";
   $("diagramTitle").textContent = (S.mode === "scan" ? "QA Scan — issue map · " : S.dataMode === "flow" ? "App flow · " : "Code flow map · ") + (S.repoName || "");
-  layout(); renderStats(); draw(); renderInspector();
+  layout(); renderStats(); draw(); renderInspector(); renderBanner();
 }
-function loadRepo(name, files){
+function normRepo(x){ return String(x || "").toLowerCase().replace(/\s*\(demo repo\)\s*/g, "").trim(); }
+function scanRepoMatch(){
+  if (!S.scanRepo) return null;
+  const a = normRepo(S.scanRepo), b = normRepo(S.repoName);
+  return a === b || a.split("/").pop() === b.split("/").pop();
+}
+function renderBanner(){
+  const bn = $("repoBanner"); if (!bn) return;
+  if (!S.repoName){ bn.classList.add("hidden"); return; }
+  bn.classList.remove("hidden");
+  const src = S.repoSource || {};
+  $("rbName").textContent = S.repoName;
+  let meta = "";
+  if (src.kind === "demo") meta = "🧪 DEMO — sample repo, not a real codebase";
+  else if (src.kind === "zip") meta = "📦 Uploaded zip · " + (src.label || "");
+  else if (src.kind === "github") meta = "🐙 GitHub · " + (src.priv ? "PRIVATE" : "PUBLIC") + (src.branch ? " · branch " + src.branch : "");
+  $("rbMeta").textContent = meta;
+  const rb = $("rbScan");
+  if (S.findings && S.findings.length){
+    const match = scanRepoMatch();
+    rb.classList.remove("hidden");
+    if (match === false){
+      rb.style.background = "#fef0c7"; rb.style.color = "#93370d";
+      rb.textContent = "⚠ QA Scan report loaded — but it is for “" + S.scanRepo + "”, NOT the repo above. Its pins may land on the wrong files.";
+    } else {
+      rb.style.background = "rgba(0,166,118,.25)"; rb.style.color = "#d3f8e3";
+      rb.textContent = "🔎 QA Scan report loaded" + (S.scanRepo ? " — for " + S.scanRepo : "") + " · " + S.findings.length + " findings" + (S.paid ? " · full report (fix steps unlocked)" : " · preview (fix steps locked)");
+    }
+  } else rb.classList.add("hidden");
+}
+function loadRepo(name, files, source){
   files = files.filter(f => !SKIP_DIR.test(f.path)).slice(0, 600);
   files.forEach(f => { f.loc = f.content ? f.content.split("\n").length : 0; f.lang = LANG[extOf(f.path)] || (extOf(f.path) || "file").toUpperCase(); });
   const g = buildGraph(files);
   S.fileData = {files, edges: g.edges, externals: g.externals, cycles: g.cycles};
   const fl = buildFlow(files);
   S.flowData = {files: fl.files, edges: fl.edges, externals: new Map(), cycles: findCycles(fl.files.map(f => f.path), fl.edges)};
-  S.repoName = name;
+  S.repoName = name; S.repoSource = source || null; S.scanRepo = null;
   S.dataMode = (g.edges.length === 0 && fl.edges.length > 0) ? "flow" : "files";
   applyDataset();
   setStatus("Loaded " + name + " — " + files.length + " files, " + g.edges.length + " file connections, " + fl.edges.length + " app-flow connections mapped." + (S.dataMode === "flow" ? " Showing the app flow (functions & user actions) because the files themselves don't import each other." : ""));
@@ -717,7 +754,7 @@ function renderFindings(){
   }
   const counts = {critical:0, high:0, medium:0, low:0};
   S.findings.forEach(f => counts[f.severity] = (counts[f.severity] || 0) + 1);
-  sum.innerHTML = "<b>" + esc(S.repoName) + "</b> — " + S.findings.length + " findings: " +
+  sum.innerHTML = "<b>" + esc(S.scanRepo || S.repoName) + "</b> — " + S.findings.length + " findings: " +
     Object.entries(counts).filter(([,n]) => n).map(([s,n]) => '<span class="sev ' + s + '">' + s + " " + n + "</span>").join(" ") +
     (S.paid ? '<div style="margin-top:6px;color:var(--brand2);font-weight:700">Full report unlocked — fix steps visible.</div>'
             : '<div style="margin-top:6px;color:var(--lock);font-weight:700">Preview — issue locations are shown; fix steps unlock with the paid report.</div>');
@@ -769,16 +806,18 @@ $("scanInput").addEventListener("change", async e => {
   try {
     const data = JSON.parse(await file.text());
     if (!Array.isArray(data.findings)) throw new Error("No findings array in file");
-    S.findings = data.findings; S.paid = !!data.paid; $("paidToggle").checked = S.paid;
+    S.findings = data.findings; S.paid = !!data.paid; S.scanRepo = data.repo || null; $("paidToggle").checked = S.paid;
+    renderBanner();
     setMode("scan"); setStatus("Scan report loaded — " + S.findings.length + " findings pinned to the map.");
+    if (scanRepoMatch() === false) setStatus("Warning: that scan report is for “" + S.scanRepo + "” but the map shows “" + S.repoName + "”.", true);
   } catch (err) { setStatus("Could not read that scan report: " + err.message, true); }
 });
 
 /* ============ Loaders ============ */
 $("demoBtn").onclick = () => {
   S.findings = DEMO_FINDINGS; S.paid = false; $("paidToggle").checked = false;
-  loadRepo("shop-api (demo repo)", DEMO.map(f => ({...f})));
-  renderFindings();
+  loadRepo("shop-api (demo repo)", DEMO.map(f => ({...f})), {kind: "demo"});
+  S.scanRepo = "shop-api (demo repo)"; renderFindings(); renderBanner();
 };
 /* ---- GitHub loading (public, PAT, or secure Connect token) ---- */
 let GH_TOKEN = null; // OAuth token from secure Connect — page memory only, never stored
@@ -821,7 +860,7 @@ async function loadGitHubRepo(owner, repo){
       setStatus("Fetching code files… " + Math.min(i + 12, codeFiles.length) + "/" + codeFiles.length);
     }
     S.findings = []; S.paid = false; $("paidToggle").checked = false;
-    loadRepo(owner + "/" + repo, files);
+    loadRepo(owner + "/" + repo, files, {kind: "github", priv: !!meta.private, branch: meta.default_branch});
     renderFindings();
   } catch (err) { setStatus("GitHub load failed: " + err.message + " (the free GitHub API also rate-limits — a .zip upload always works.)", true); }
   btn.disabled = false;
@@ -975,7 +1014,7 @@ async function loadZip(file){
       files.push({path: clean, content});
     }
     S.findings = []; S.paid = false; $("paidToggle").checked = false;
-    loadRepo(file.name.replace(/\.zip$/i, ""), files);
+    loadRepo(file.name.replace(/\.zip$/i, ""), files, {kind: "zip", label: file.name});
     renderFindings();
   } catch (err) { setStatus("Could not read that zip: " + err.message, true); }
 }
@@ -990,8 +1029,9 @@ $("dmFlow").onclick = () => { S.dataMode = "flow"; applyDataset(); };
 
 /* ============ Init: preload the demo so the product is visible instantly ============ */
 S.findings = DEMO_FINDINGS;
-loadRepo("shop-api (demo repo)", DEMO.map(f => ({...f})));
-renderFindings();
+loadRepo("shop-api (demo repo)", DEMO.map(f => ({...f})), {kind: "demo"});
+S.scanRepo = "shop-api (demo repo)";
+renderFindings(); renderBanner();
 </script>
 </body>
 </html>
