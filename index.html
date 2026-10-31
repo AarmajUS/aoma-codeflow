@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CodeFlow by AOMA — See your code. Then see what's wrong with it.</title>
+<style>
+  :root{
+    --ink:#0f1c2e; --ink2:#42556e; --line:#d7e0ea; --bg:#f4f7fb; --card:#ffffff;
+    --brand:#0b5fff; --brand2:#00a676; --crit:#d92d20; --high:#f79009; --med:#2e90fa; --low:#667085;
+    --lock:#946f00; --lockbg:#fffaeb;
+  }
+  *{box-sizing:border-box} html,body{margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink);}
+  a{color:var(--brand)}
+  header{background:linear-gradient(135deg,#0a2540 0%,#0b5fff 130%);color:#fff;padding:26px 18px 20px}
+  .wrap{max-width:1180px;margin:0 auto}
+  .brandrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .logo{font-weight:800;letter-spacing:.14em;font-size:13px;background:#fff;color:#0a2540;border-radius:6px;padding:4px 8px}
+  h1{font-size:26px;margin:8px 0 4px;line-height:1.15}
+  .tag{opacity:.88;font-size:14.5px;max-width:720px;line-height:1.45}
+  .stages{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap}
+  .stage{flex:1 1 300px;background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.25);border-radius:12px;padding:12px 14px;cursor:pointer;text-align:left;color:#fff;font:inherit}
+  .stage.active{background:#fff;color:var(--ink);border-color:#fff}
+  .stage .k{font-size:11px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;opacity:.75}
+  .stage .t{font-size:16.5px;font-weight:700;margin:2px 0}
+  .stage .d{font-size:13px;line-height:1.4;opacity:.85}
+  .price{float:right;font-weight:800;font-size:15px}
+  main{padding:16px 18px 30px}
+  .loader{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
+  .loader .row{display:flex;gap:8px;flex-wrap:wrap}
+  input[type=text]{flex:1 1 260px;padding:11px 12px;border:1px solid var(--line);border-radius:9px;font-size:14.5px}
+  button.btn{padding:11px 16px;border-radius:9px;border:1px solid var(--brand);background:var(--brand);color:#fff;font-weight:700;font-size:14.5px;cursor:pointer}
+  button.btn.ghost{background:#fff;color:var(--brand)}
+  button.btn.dark{background:#0a2540;border-color:#0a2540}
+  button.btn:disabled{opacity:.55;cursor:wait}
+  .drop{margin-top:10px;border:1.5px dashed var(--line);border-radius:10px;padding:12px;text-align:center;color:var(--ink2);font-size:13.5px}
+  .drop.over{border-color:var(--brand);background:#eef4ff;color:var(--ink)}
+  #status{margin-top:10px;font-size:13.5px;color:var(--ink2);min-height:18px}
+  #status.err{color:var(--crit);font-weight:600}
+  .stats{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:13px}
+  .stat b{font-size:16px;display:block}
+  .stat.warn b{color:var(--high)} .stat.bad b{color:var(--crit)}
+  .grid{display:grid;grid-template-columns:1fr 340px;gap:14px;align-items:start}
+  @media (max-width:900px){.grid{grid-template-columns:1fr}}
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .panel h3{margin:0;padding:11px 14px;font-size:14px;border-bottom:1px solid var(--line);letter-spacing:.02em}
+  .panel .body{padding:12px 14px;font-size:13.5px;line-height:1.5;color:var(--ink2)}
+  .panel .body b{color:var(--ink)}
+  #diagramWrap{position:relative;background:#fbfcfe}
+  #diagram{width:100%;height:560px;display:block;cursor:grab;touch-action:none}
+  #diagram:active{cursor:grabbing}
+  .zoomctl{position:absolute;top:10px;right:10px;display:flex;gap:6px}
+  .zoomctl button{width:34px;height:34px;border-radius:8px;border:1px solid var(--line);background:#fff;font-size:16px;font-weight:700;cursor:pointer;color:var(--ink)}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;padding:9px 14px;border-top:1px solid var(--line);font-size:12.5px;color:var(--ink2)}
+  .dot{display:inline-block;width:10px;height:10px;border-radius:50%;vertical-align:-1px;margin-right:5px}
+  .kv{margin:0 0 6px} .kv span{color:var(--ink2)}
+  .filelist{max-height:210px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px 8px;font-size:12.5px;background:#fbfcfe}
+  .sev{display:inline-block;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;padding:2px 7px;border-radius:99px;color:#fff}
+  .sev.critical{background:var(--crit)} .sev.high{background:var(--high)} .sev.medium{background:var(--med)} .sev.low{background:var(--low)}
+  .cat{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--ink2)}
+  .finding{border:1px solid var(--line);border-radius:10px;padding:11px 12px;margin-bottom:10px;background:#fff}
+  .finding .ft{font-weight:700;color:var(--ink);font-size:14px;margin:4px 0}
+  .finding .loc{font-size:12.5px;color:var(--brand);cursor:pointer;font-family:ui-monospace,Menlo,Consolas,monospace}
+  .finding .fd{font-size:13.5px;color:var(--ink2);line-height:1.5}
+  .fixbox{margin-top:9px;border-radius:9px;padding:10px 12px;font-size:13.5px;line-height:1.55}
+  .fixbox.locked{background:var(--lockbg);border:1px dashed #e3c878;color:#6b5410}
+  .fixbox.open{background:#ecfdf3;border:1px solid #a6f4c5;color:#05603a}
+  .fixbox ol{margin:6px 0 0 18px;padding:0}
+  .blur{filter:blur(4px);user-select:none;pointer-events:none}
+  .cta{background:linear-gradient(135deg,#0a2540,#0b5fff);color:#fff;border-radius:12px;padding:16px;margin-top:14px}
+  .cta .t{font-size:17px;font-weight:800;margin-bottom:4px}
+  .cta .d{font-size:13.5px;opacity:.9;line-height:1.5;max-width:760px}
+  .cta a.btn{display:inline-block;margin-top:10px;background:#fff;color:#0a2540;padding:11px 18px;border-radius:9px;font-weight:800;text-decoration:none}
+  .scanbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+  .switch{font-size:13.5px;color:var(--ink2);display:flex;gap:7px;align-items:center}
+  .hidden{display:none!important}
+  .nodeLbl{font:600 12px -apple-system,"Segoe UI",Roboto,sans-serif;fill:#0f1c2e}
+  .grpLbl{font:800 11px -apple-system,"Segoe UI",Roboto,sans-serif;fill:#42556e;letter-spacing:.08em}
+  footer{padding:6px 18px 26px;color:var(--ink2);font-size:12.5px}
+  code{background:#eef2f7;border-radius:5px;padding:1px 5px;font-size:12px}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <div class="brandrow"><span class="logo">AOMA</span><span style="font-weight:700;letter-spacing:.04em">CodeFlow — QA Sweep visual front door</span></div>
+    <h1>First, see how your code actually flows.<br>Then see exactly where it can break.</h1>
+    <div class="tag">Upload a repo or paste a public GitHub link. Stage 1 maps the structure and flow of your codebase — free, in your browser, your code never leaves your machine. Stage 2 is the $299 AI Code Risk Scan: the same map, with expert-reviewed pointers on every real issue — and the exact steps to fix each one.</div>
+    <div class="stages">
+      <button class="stage active" id="tabFlow"><span class="price">FREE</span><div class="k">Stage 1</div><div class="t">Code Flow Map</div><div class="d">Structure, dependencies, circular references and orphaned files — drawn as one diagram.</div></button>
+      <button class="stage" id="tabScan"><span class="price">$299</span><div class="k">Stage 2</div><div class="t">QA Scan — Issue Pointers</div><div class="d">Code &amp; concurrency bugs, security vulnerabilities and logic errors pinned to the map, with step-by-step fixes unlocked on payment.</div></button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+    <section class="loader" id="loaderBox">
+      <div class="row">
+        <input type="text" id="ghUrl" placeholder="Paste a public GitHub repo — e.g. https://github.com/owner/repo">
+        <button class="btn" id="ghLoad">Load repo</button>
+        <button class="btn ghost" id="demoBtn">Try the demo repo</button>
+      </div>
+      <div class="drop" id="drop">…or drop a repo <b>.zip</b> here, or <label for="zipInput" style="color:var(--brand);font-weight:700;cursor:pointer">browse to upload</label><input type="file" id="zipInput" accept=".zip" class="hidden"></div>
+      <div id="status">Demo repo is preloaded so you can see exactly how it works. Your uploads are parsed locally — nothing is sent to a server.</div>
+    </section>
+
+    <div class="stats" id="stats"></div>
+
+    <div class="grid">
+      <div class="panel">
+        <h3 id="diagramTitle">Code flow map</h3>
+        <div id="diagramWrap">
+          <svg id="diagram" xmlns="http://www.w3.org/2000/svg"></svg>
+          <div class="zoomctl"><button id="zOut" title="Zoom out">−</button><button id="zFit" title="Fit to screen" style="width:auto;padding:0 10px;font-size:12.5px">Fit</button><button id="zIn" title="Zoom in">+</button></div>
+        </div>
+        <div class="legend" id="legend">
+          <span><span class="dot" style="background:#2e90fa"></span>file (box = folder group)</span>
+          <span><span class="dot" style="background:#98a2b3"></span>arrow = imports / depends on</span>
+          <span class="scanLegend hidden"><span class="dot" style="background:var(--crit)"></span>critical</span>
+          <span class="scanLegend hidden"><span class="dot" style="background:var(--high)"></span>high</span>
+          <span class="scanLegend hidden"><span class="dot" style="background:var(--med)"></span>medium</span>
+          <span>Click any file to inspect it. Drag to pan, scroll to zoom.</span>
+        </div>
+      </div>
+
+      <div>
+        <div class="panel" id="inspectPanel">
+          <h3>Inspector</h3>
+          <div class="body" id="inspectBody">Click a file in the diagram to see what it imports, what depends on it, and any scan findings pinned to it.</div>
+        </div>
+
+        <div class="panel hidden" id="scanPanel" style="margin-top:14px">
+          <h3>QA Scan findings</h3>
+          <div class="body">
+            <div class="scanbar">
+              <label class="btn ghost" style="padding:8px 12px;font-size:13px;cursor:pointer">Load scan report (.json)<input type="file" id="scanInput" accept=".json" class="hidden"></label>
+              <label class="switch"><input type="checkbox" id="paidToggle"> Preview paid report (demo)</label>
+            </div>
+            <div id="scanSummary"></div>
+            <div id="findings"></div>
+          </div>
+        </div>
+
+        <div class="cta" id="ctaBox">
+          <div class="t">The map is free. The answers are $299.</div>
+          <div class="d">The AI Code Risk Scan puts senior-developer eyes on your codebase: every pointer on this map explained — race conditions, security holes, broken logic — each with the exact fix steps, in order. Delivered as this same visual report, fully unlocked.</div>
+          <a class="btn" href="https://aomaai.com" target="_blank" rel="noopener">Book the $299 AI Code Risk Scan</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">CodeFlow by AOMA. Stage 1 analysis runs 100% in your browser. Stage 2 scan reports are produced by experienced human developers with AI assistance and delivered as a findings file this page renders. Scan report format: <code>{"repo":"name","paid":true,"findings":[{"severity":"critical|high|medium|low","category":"Security|Code &amp; concurrency|Logic|Structure","file":"src/app.js","line":12,"title":"…","detail":"…","fix":["step 1","step 2"]}]}</code></div>
+</footer>
+
+<script>
+"use strict";
+/* ============ State ============ */
+const S = {
+  repoName: "", files: [], byPath: new Map(), edges: [], // edges: {from,to}
+  externals: new Map(), // file -> [bare imports]
+  cycles: new Set(), selected: null,
+  findings: [], paid: false, mode: "flow",
+  view: {x:0, y:0, w:1200, h:560}, layout: {nodes:new Map(), groups:[], W:1200, H:560}
+};
+const CODE_EXT = /\.(js|jsx|ts|tsx|mjs|cjs|py|rb|php|go|java|cs|rs|c|cpp|h|vue|svelte)$/i;
+const SKIP_DIR = /(^|\/)(node_modules|\.git|dist|build|vendor|__pycache__|\.next|coverage|out|target)\//;
+const LANG = {js:"JavaScript",jsx:"JavaScript",ts:"TypeScript",tsx:"TypeScript",mjs:"JavaScript",cjs:"JavaScript",py:"Python",rb:"Ruby",php:"PHP",go:"Go",java:"Java",cs:"C#",rs:"Rust",c:"C",cpp:"C++",h:"C/C++",vue:"Vue",svelte:"Svelte",json:"JSON",md:"Markdown",css:"CSS",html:"HTML"};
+
+/* ============ Demo repo ============ */
+const DEMO = [
+ {path:"package.json", content:'{\n  "name": "shop-api",\n  "version": "1.0.0",\n  "main": "src/index.js",\n  "dependencies": { "express": "^4.18.0", "pg": "^8.11.0", "stripe": "^14.0.0" }\n}'},
+ {path:"README.md", content:"# shop-api\nSmall e-commerce API. Entry: src/index.js"},
+ {path:"src/index.js", content:'const express = require("express");\nconst orders = require("./routes/orders");\nconst users = require("./routes/users");\nconst config = require("./config");\nconst logger = require("./utils/logger");\n\nconst app = express();\napp.use("/orders", orders);\napp.use("/users", users);\napp.listen(config.port, () => logger.info("up"));'},
+ {path:"src/config.js", content:'module.exports = {\n  port: 8080,\n  stripeSecretKey: "sk_live_DEMO_KEY_NOT_REAL_0000",\n  dbUrl: process.env.DB_URL\n};'},
+ {path:"src/routes/orders.js", content:'const router = require("express").Router();\nconst orderService = require("../services/orderService");\nconst logger = require("../utils/logger");\n\nrouter.post("/", async (req, res) => {\n  const order = await orderService.placeOrder(req.body);\n  logger.info("order placed", order.id);\n  res.json(order);\n});\nmodule.exports = router;'},
+ {path:"src/routes/users.js", content:'const router = require("express").Router();\nconst userService = require("../services/userService");\n\nrouter.post("/register", async (req, res) => {\n  const user = await userService.register(req.body);\n  res.json(user);\n});\nmodule.exports = router;'},
+ {path:"src/services/orderService.js", content:'const pool = require("../db/pool");\nconst payments = require("./paymentService");\nconst money = require("../utils/money");\n\nasync function placeOrder({ itemId, qty, userId }) {\n  const { rows } = await pool.query("SELECT stock FROM items WHERE id=$1", [itemId]);\n  const stock = rows[0].stock;\n  if (stock < qty) throw new Error("out of stock");\n  await pool.query("UPDATE items SET stock = stock - $1 WHERE id=$2", [qty, itemId]);\n  const total = money.totalFor(itemId, qty);\n  await payments.charge(userId, total);\n  return { itemId, qty, total };\n}\nmodule.exports = { placeOrder };'},
+ {path:"src/services/paymentService.js", content:'const Stripe = require("stripe");\nconst config = require("../config");\nconst logger = require("../utils/logger");\n\nconst stripe = new Stripe(config.stripeSecretKey);\nasync function charge(userId, amount) {\n  logger.info("charging", userId, amount);\n  return stripe.charges.create({ amount, currency: "usd" });\n}\nmodule.exports = { charge };'},
+ {path:"src/services/userService.js", content:'const pool = require("../db/pool");\nconst hash = require("../utils/hash");\n\nasync function register({ email, password }) {\n  const hashed = hash.password(password);\n  const { rows } = await pool.query(\n    "INSERT INTO users(email, password_hash) VALUES($1,$2) RETURNING id", [email, hashed]);\n  return rows[0];\n}\nmodule.exports = { register };'},
+ {path:"src/db/pool.js", content:'const { Pool } = require("pg");\nconst config = require("../config");\nmodule.exports = new Pool({ connectionString: config.dbUrl });'},
+ {path:"src/utils/logger.js", content:'function info(...args) { console.log("[shop]", ...args); }\nmodule.exports = { info };'},
+ {path:"src/utils/money.js", content:'const orderService = require("../services/orderService");\n\nconst PRICES = { 1: 1999, 2: 3499 };\nfunction totalFor(itemId, qty) {\n  const each = Math.round(PRICES[itemId] * 1.08875); // tax rounded per item\n  return each * qty;\n}\nmodule.exports = { totalFor, PRICES };'},
+ {path:"src/utils/hash.js", content:'const crypto = require("crypto");\nfunction password(pw) {\n  return crypto.createHash("md5").update(pw).digest("hex");\n}\nmodule.exports = { password };'}
+];
+const DEMO_FINDINGS = [
+ {severity:"critical", category:"Security", file:"src/config.js", line:3, title:"Live payment secret key hardcoded in the repo",
+  detail:"A production Stripe secret key sits in plain text in version control. Anyone with repo access — past or present — has full charge/refund access to the payment account. Key scanners index public and leaked repos within minutes.",
+  fix:["Revoke this key in the Stripe dashboard NOW and issue a new one — treat the old key as public.","Move the new key to an environment variable / secret manager; config.js should read process.env only.","Purge the key from git history (git filter-repo or BFG) and force-push; the commit alone is not enough.","Add a pre-commit secret scanner (e.g. gitleaks) so this cannot recur."]},
+ {severity:"high", category:"Code & concurrency", file:"src/services/orderService.js", line:6, title:"Race condition: stock check and stock decrement are separate steps",
+  detail:"placeOrder reads stock, checks it, then decrements — with an await between the read and the write. Two orders arriving at the same moment both pass the check against the same stock value, and the last unit gets sold twice. This is the classic check-then-act race; it only appears under real traffic, never in casual testing.",
+  fix:["Replace the read-check-write with one atomic statement: UPDATE items SET stock = stock - $1 WHERE id = $2 AND stock >= $1.","Check the affected-row count: 0 rows means insufficient stock — reject the order there.","If other writes must join the same unit of work, wrap them in a single transaction with the atomic update first.","Add a concurrency test: fire 10 parallel orders against stock of 3 and assert exactly 3 succeed."]},
+ {severity:"high", category:"Security", file:"src/utils/hash.js", line:3, title:"Passwords hashed with MD5 — fast and unsalted",
+  detail:"MD5 was designed for speed, which is exactly what password storage must not be: commodity hardware tries billions of MD5 guesses per second, and with no salt, one leaked database cracks most passwords from rainbow tables. Every registered user's password is effectively stored close to plain text.",
+  fix:["Switch password hashing to argon2id (preferred) or bcrypt with cost factor 12+.","Rehash transparently: at each user's next successful login, verify against MD5 once, then store the new strong hash.","Force a password reset for admin/privileged accounts immediately — do not wait for their next login.","Never log or email the old hashes during migration; treat the users table as compromised data."]},
+ {severity:"medium", category:"Logic", file:"src/utils/money.js", line:5, title:"Tax rounded per item instead of per order — totals drift by cents",
+  detail:"totalFor rounds the taxed unit price first, then multiplies by quantity. Accounting expects tax computed on the order subtotal, rounded once. The two methods disagree by a few cents on multi-unit orders, so charged amounts will not reconcile against invoices or the payment ledger.",
+  fix:["Keep all money as integer cents internally; never do tax math on floats or pre-rounded units.","Compute tax once, on the order subtotal: tax = round(subtotal * rate).","Add fixed test cases (qty 1..10 across price points) asserting the charged total equals the invoice total.","Reconcile past orders: quantify the drift before deciding whether remediation is owed."]},
+ {severity:"medium", category:"Structure", file:"src/utils/money.js", line:1, title:"Circular dependency: utils imports services (money.js ↔ orderService.js)",
+  detail:"A utils module imports orderService, which imports money back. Circular imports in Node resolve partially — depending on load order, one side can receive an incomplete module — and the low-level utils layer now depends on the service layer it is supposed to support. It makes both files hard to test and fragile to reorder.",
+  fix:["Identify what money.js actually needs from orderService (here: nothing at runtime — the import is unused, so delete it).","If shared data is genuinely needed, move it DOWN into utils or config — lower layers never import upper layers.","Add a circular-dependency check (e.g. madge --circular) to CI so the next cycle fails the build.","Re-run the flow map after the fix and confirm the cycle count reads zero."]}
+];
+
+/* ============ Parsing ============ */
+function extOf(p){ const m = p.toLowerCase().match(/\.([a-z0-9]+)$/); return m ? m[1] : ""; }
+function isCode(p){ return CODE_EXT.test(p); }
+function dirOf(p){ const i = p.lastIndexOf("/"); return i < 0 ? "" : p.slice(0, i); }
+function baseOf(p){ return p.split("/").pop(); }
+
+function resolveRel(fromFile, spec, paths){
+  const dir = dirOf(fromFile);
+  const parts = (dir ? dir + "/" + spec : spec).split("/");
+  const out = [];
+  for (const seg of parts){ if (seg === "." ) continue; if (seg === "..") out.pop(); else out.push(seg); }
+  const base = out.join("/");
+  const cands = [base, base + ".js", base + ".ts", base + ".jsx", base + ".tsx", base + ".mjs", base + ".py",
+    base + "/index.js", base + "/index.ts", base + "/index.tsx", base + "/__init__.py"];
+  for (const c of cands) if (paths.has(c)) return c;
+  return null;
+}
+function parseImports(file){
+  const res = {internal: [], external: []};
+  if (!file.content || !isCode(file.path)) return res;
+  const text = file.content;
+  const specs = new Set();
+  let m;
+  const re1 = /(?:import|export)[^'"]*?from\s*['"]([^'"]+)['"]/g;
+  const re2 = /import\s*['"]([^'"]+)['"]/g;
+  const re3 = /require\(\s*['"]([^'"]+)['"]\s*\)/g;
+  while ((m = re1.exec(text))) specs.add(m[1]);
+  while ((m = re2.exec(text))) specs.add(m[1]);
+  while ((m = re3.exec(text))) specs.add(m[1]);
+  if (/\.py$/i.test(file.path)){
+    const re4 = /^\s*import\s+([a-zA-Z0-9_\.]+)/gm;
+    const re5 = /^\s*from\s+([a-zA-Z0-9_\.]+)\s+import/gm;
+    while ((m = re4.exec(text))) specs.add(m[1]);
+    while ((m = re5.exec(text))) specs.add(m[1]);
+  }
+  return {specs: [...specs]};
+}
+function buildGraph(files){
+  const byPath = new Map(); files.forEach(f => byPath.set(f.path, f));
+  const edges = [], ext = new Map(); const seenE = new Set();
+  for (const f of files){
+    const {specs} = parseImports(f);
+    for (const spec of specs || []){
+      let target = null;
+      if (spec.startsWith(".")) target = resolveRel(f.path, spec, byPath);
+      else if (/\.py$/i.test(f.path) && !spec.includes("/")) {
+        const p = spec.replace(/\./g, "/");
+        if (byPath.has(p + ".py")) target = p + ".py";
+        else if (byPath.has(p + "/__init__.py")) target = p + "/__init__.py";
+      }
+      if (target && target !== f.path){
+        const k = f.path + ">" + target;
+        if (!seenE.has(k)){ seenE.add(k); edges.push({from: f.path, to: target}); }
+      } else if (!spec.startsWith(".")){
+        if (!ext.has(f.path)) ext.set(f.path, []);
+        const name = spec.startsWith("@") ? spec.split("/").slice(0,2).join("/") : spec.split("/")[0];
+        if (!ext.get(f.path).includes(name)) ext.get(f.path).push(name);
+      }
+    }
+  }
+  // cycle detection (iterative DFS coloring)
+  const adj = new Map(); edges.forEach(e => { if (!adj.has(e.from)) adj.set(e.from, []); adj.get(e.from).push(e.to); });
+  const color = new Map(); const cycles = new Set();
+  function dfs(u, stack){
+    color.set(u, 1); stack.push(u);
+    for (const v of adj.get(u) || []){
+      if (color.get(v) === 1){ const i = stack.indexOf(v); stack.slice(i).forEach(n => cycles.add(n)); }
+      else if (!color.get(v)) dfs(v, stack);
+    }
+    stack.pop(); color.set(u, 2);
+  }
+  for (const f of files) if (isCode(f.path) && !color.get(f.path)) dfs(f.path, []);
+  return {byPath, edges, externals: ext, cycles};
+}
+function loadRepo(name, files){
+  files = files.filter(f => !SKIP_DIR.test(f.path)).slice(0, 600);
+  files.forEach(f => { f.loc = f.content ? f.content.split("\n").length : 0; f.lang = LANG[extOf(f.path)] || (extOf(f.path) || "file").toUpperCase(); });
+  const g = buildGraph(files);
+  S.repoName = name; S.files = files; S.byPath = g.byPath; S.edges = g.edges; S.externals = g.externals; S.cycles = g.cycles; S.selected = null;
+  layout(); renderStats(); draw(); renderInspector();
+  setStatus("Loaded " + name + " — " + files.length + " files, " + g.edges.length + " internal connections mapped.");
+}
+
+/* ============ Layout & drawing ============ */
+const NODE_W = 176, NODE_H = 36, GAP = 10, PAD = 14, TITLE_H = 22;
+function layout(){
+  const groups = new Map();
+  for (const f of S.files){
+    const g = dirOf(f.path) || "(root)";
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g).push(f);
+  }
+  const glist = [...groups.entries()].map(([name, fs]) => {
+    fs.sort((a,b) => a.path.localeCompare(b.path));
+    const h = TITLE_H + PAD + fs.length * (NODE_H + GAP) + PAD - GAP;
+    return {name, files: fs, w: NODE_W + PAD * 2, h};
+  }).sort((a,b) => b.files.length - a.files.length);
+  const MAXW = 1240; let x = 16, y = 16, rowH = 0; const nodes = new Map();
+  for (const g of glist){
+    if (x + g.w > MAXW && x > 16){ x = 16; y += rowH + 26; rowH = 0; }
+    g.x = x; g.y = y; rowH = Math.max(rowH, g.h);
+    g.files.forEach((f, i) => nodes.set(f.path, {x: g.x + PAD, y: g.y + TITLE_H + PAD + i * (NODE_H + GAP), w: NODE_W, h: NODE_H}));
+    x += g.w + 26;
+  }
+  S.layout = {nodes, groups: glist, W: MAXW + 32, H: y + rowH + 32};
+  S.view = {x: 0, y: 0, w: S.layout.W, h: Math.max(560, S.layout.H)};
+}
+const $ = id => document.getElementById(id);
+const svg = $("diagram");
+function sevRank(s){ return {critical:0, high:1, medium:2, low:3}[s] ?? 4; }
+function worstSevFor(path){
+  let w = null;
+  for (const f of S.findings) if (f.file === path && (w === null || sevRank(f.severity) < sevRank(w))) w = f.severity;
+  return w;
+}
+function draw(){
+  const L = S.layout; const NS = "http://www.w3.org/2000/svg";
+  svg.setAttribute("viewBox", S.view.x + " " + S.view.y + " " + S.view.w + " " + S.view.h);
+  svg.innerHTML = "";
+  const defs = document.createElementNS(NS, "defs");
+  defs.innerHTML = '<marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#98a2b3"/></marker>' +
+    '<marker id="arrHi" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#0b5fff"/></marker>';
+  svg.appendChild(defs);
+  // groups
+  for (const g of L.groups){
+    const r = document.createElementNS(NS, "rect");
+    r.setAttribute("x", g.x); r.setAttribute("y", g.y); r.setAttribute("width", g.w); r.setAttribute("height", g.h);
+    r.setAttribute("rx", 12); r.setAttribute("fill", "#eef3f9"); r.setAttribute("stroke", "#d7e0ea");
+    svg.appendChild(r);
+    const t = document.createElementNS(NS, "text");
+    t.setAttribute("x", g.x + PAD); t.setAttribute("y", g.y + 17); t.setAttribute("class", "grpLbl");
+    t.textContent = g.name.toUpperCase();
+    svg.appendChild(t);
+  }
+  // edges
+  const sel = S.selected;
+  for (const e of S.edges){
+    const a = L.nodes.get(e.from), b = L.nodes.get(e.to);
+    if (!a || !b) continue;
+    const x1 = a.x + a.w / 2, y1 = a.y + a.h / 2, x2 = b.x + b.w / 2, y2 = b.y + b.h / 2;
+    const mx = (x1 + x2) / 2;
+    const p = document.createElementNS(NS, "path");
+    p.setAttribute("d", "M" + x1 + "," + y1 + " C" + mx + "," + y1 + " " + mx + "," + y2 + " " + x2 + "," + y2);
+    const hi = sel && (e.from === sel || e.to === sel);
+    const cyc = S.cycles.has(e.from) && S.cycles.has(e.to);
+    p.setAttribute("fill", "none");
+    p.setAttribute("stroke", hi ? "#0b5fff" : cyc ? "#f79009" : "#c3cedd");
+    p.setAttribute("stroke-width", hi ? 2.4 : 1.4);
+    p.setAttribute("marker-end", hi ? "url(#arrHi)" : "url(#arr)");
+    p.setAttribute("opacity", sel && !hi ? 0.25 : 0.9);
+    svg.appendChild(p);
+  }
+  // nodes
+  for (const f of S.files){
+    const n = L.nodes.get(f.path); if (!n) continue;
+    const g = document.createElementNS(NS, "g");
+    g.style.cursor = "pointer";
+    const isSel = sel === f.path;
+    const r = document.createElementNS(NS, "rect");
+    r.setAttribute("x", n.x); r.setAttribute("y", n.y); r.setAttribute("width", n.w); r.setAttribute("height", n.h); r.setAttribute("rx", 8);
+    r.setAttribute("fill", isSel ? "#dce9ff" : "#ffffff");
+    r.setAttribute("stroke", isSel ? "#0b5fff" : S.cycles.has(f.path) ? "#f79009" : "#b9c7d8");
+    r.setAttribute("stroke-width", isSel ? 2.2 : 1.3);
+    g.appendChild(r);
+    const dot = document.createElementNS(NS, "circle");
+    dot.setAttribute("cx", n.x + 13); dot.setAttribute("cy", n.y + n.h / 2); dot.setAttribute("r", 4.5);
+    dot.setAttribute("fill", isCode(f.path) ? "#2e90fa" : "#98a2b3");
+    g.appendChild(dot);
+    const t = document.createElementNS(NS, "text");
+    t.setAttribute("x", n.x + 24); t.setAttribute("y", n.y + n.h / 2 + 4); t.setAttribute("class", "nodeLbl");
+    const lbl = baseOf(f.path); t.textContent = lbl.length > 21 ? lbl.slice(0, 20) + "…" : lbl;
+    g.appendChild(t);
+    if (S.mode === "scan"){
+      const w = worstSevFor(f.path);
+      if (w){
+        const c = document.createElementNS(NS, "circle");
+        c.setAttribute("cx", n.x + n.w - 4); c.setAttribute("cy", n.y + 2); c.setAttribute("r", 9);
+        c.setAttribute("fill", {critical:"#d92d20", high:"#f79009", medium:"#2e90fa", low:"#667085"}[w]);
+        c.setAttribute("stroke", "#fff"); c.setAttribute("stroke-width", 2);
+        g.appendChild(c);
+        const cnt = S.findings.filter(x => x.file === f.path).length;
+        const ct = document.createElementNS(NS, "text");
+        ct.setAttribute("x", n.x + n.w - 4); ct.setAttribute("y", n.y + 6); ct.setAttribute("text-anchor", "middle");
+        ct.setAttribute("style", "font:800 10px sans-serif;fill:#fff");
+        ct.textContent = cnt;
+        g.appendChild(ct);
+      }
+    }
+    g.addEventListener("click", ev => { ev.stopPropagation(); S.selected = f.path; draw(); renderInspector(); if (S.mode === "scan") renderFindings(); });
+    svg.appendChild(g);
+  }
+  $("diagramTitle").textContent = (S.mode === "scan" ? "QA Scan — issue map · " : "Code flow map · ") + (S.repoName || "");
+}
+/* pan & zoom */
+(function(){
+  let drag = null;
+  svg.addEventListener("pointerdown", e => { drag = {x: e.clientX, y: e.clientY, v: {...S.view}}; svg.setPointerCapture(e.pointerId); });
+  svg.addEventListener("pointermove", e => {
+    if (!drag) return;
+    const rect = svg.getBoundingClientRect();
+    const dx = (e.clientX - drag.x) * S.view.w / rect.width, dy = (e.clientY - drag.y) * S.view.h / rect.height;
+    S.view.x = drag.v.x - dx; S.view.y = drag.v.y - dy;
+    svg.setAttribute("viewBox", S.view.x + " " + S.view.y + " " + S.view.w + " " + S.view.h);
+  });
+  svg.addEventListener("pointerup", () => drag = null);
+  svg.addEventListener("wheel", e => { e.preventDefault(); zoom(e.deltaY < 0 ? 0.88 : 1.14); }, {passive: false});
+  svg.addEventListener("click", () => { S.selected = null; draw(); renderInspector(); if (S.mode === "scan") renderFindings(); });
+})();
+function zoom(f){
+  const cx = S.view.x + S.view.w / 2, cy = S.view.y + S.view.h / 2;
+  S.view.w = Math.min(4000, Math.max(220, S.view.w * f)); S.view.h = Math.min(3000, Math.max(165, S.view.h * f));
+  S.view.x = cx - S.view.w / 2; S.view.y = cy - S.view.h / 2;
+  svg.setAttribute("viewBox", S.view.x + " " + S.view.y + " " + S.view.w + " " + S.view.h);
+}
+$("zIn").onclick = () => zoom(0.8);
+$("zOut").onclick = () => zoom(1.25);
+$("zFit").onclick = () => { S.view = {x: 0, y: 0, w: S.layout.W, h: Math.max(560, S.layout.H)}; draw(); };
+
+/* ============ Stats & inspector ============ */
+function renderStats(){
+  const code = S.files.filter(f => isCode(f.path));
+  const loc = S.files.reduce((a, f) => a + (f.loc || 0), 0);
+  const langs = {};
+  S.files.forEach(f => { if (f.lang) langs[f.lang] = (langs[f.lang] || 0) + 1; });
+  const topLang = Object.entries(langs).sort((a,b) => b[1] - a[1]).slice(0, 3).map(x => x[0]).join(" · ");
+  const orphans = code.filter(f => !S.edges.some(e => e.from === f.path || e.to === f.path)).length;
+  $("stats").innerHTML =
+    stat(S.files.length, "files mapped") + stat(code.length, "code files") + stat(loc.toLocaleString(), "lines of code") +
+    stat(S.edges.length, "internal connections") + stat(topLang || "—", "main languages", true) +
+    stat(S.cycles.size, "files in circular deps", false, S.cycles.size ? "warn" : "") +
+    stat(orphans, "unconnected files", false, "");
+  function stat(v, l, raw, cls){ return '<div class="stat ' + (cls || "") + '"><b>' + v + "</b>" + l + "</div>"; }
+}
+function esc(s){ return String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+function renderInspector(){
+  const b = $("inspectBody");
+  if (!S.selected){ b.innerHTML = "Click a file in the diagram to see what it imports, what depends on it, and any scan findings pinned to it."; return; }
+  const f = S.byPath.get(S.selected); if (!f) return;
+  const outs = S.edges.filter(e => e.from === f.path).map(e => e.to);
+  const ins = S.edges.filter(e => e.to === f.path).map(e => e.from);
+  const exts = S.externals.get(f.path) || [];
+  const finds = S.findings.filter(x => x.file === f.path);
+  b.innerHTML =
+    '<p class="kv"><b>' + esc(f.path) + '</b></p>' +
+    '<p class="kv"><span>Language:</span> ' + esc(f.lang) + (f.loc ? ' &nbsp;·&nbsp; <span>Lines:</span> ' + f.loc : "") +
+    (S.cycles.has(f.path) ? ' &nbsp;·&nbsp; <b style="color:var(--high)">in a circular dependency</b>' : "") + '</p>' +
+    '<p class="kv"><span>Imports (' + outs.length + '):</span></p><div class="filelist">' + (outs.length ? outs.map(esc).join("<br>") : "—") + '</div>' +
+    '<p class="kv" style="margin-top:8px"><span>Depended on by (' + ins.length + '):</span></p><div class="filelist">' + (ins.length ? ins.map(esc).join("<br>") : "—") + '</div>' +
+    (exts.length ? '<p class="kv" style="margin-top:8px"><span>External packages:</span> ' + exts.map(esc).join(", ") + '</p>' : "") +
+    (finds.length ? '<p class="kv" style="margin-top:8px"><b>Scan findings here:</b> ' + finds.map(x => '<span class="sev ' + x.severity + '">' + x.severity + '</span>').join(" ") + '</p>' : "");
+}
+
+/* ============ Scan layer ============ */
+function setStatus(msg, isErr){
+  const el = $("status"); el.textContent = msg; el.className = isErr ? "err" : "";
+  el.id = "status";
+}
+function renderFindings(){
+  const sum = $("scanSummary"), box = $("findings");
+  if (!S.findings.length){
+    sum.innerHTML = "<b>No scan report loaded for this repo.</b><br>The flow map is free. The $299 AI Code Risk Scan produces the findings file that pins every issue to this map — with fix steps unlocked.";
+    box.innerHTML = ""; return;
+  }
+  const counts = {critical:0, high:0, medium:0, low:0};
+  S.findings.forEach(f => counts[f.severity] = (counts[f.severity] || 0) + 1);
+  sum.innerHTML = "<b>" + esc(S.repoName) + "</b> — " + S.findings.length + " findings: " +
+    Object.entries(counts).filter(([,n]) => n).map(([s,n]) => '<span class="sev ' + s + '">' + s + " " + n + "</span>").join(" ") +
+    (S.paid ? '<div style="margin-top:6px;color:var(--brand2);font-weight:700">Full report unlocked — fix steps visible.</div>'
+            : '<div style="margin-top:6px;color:var(--lock);font-weight:700">Preview — issue locations are shown; fix steps unlock with the paid report.</div>');
+  const cats = ["Security", "Code & concurrency", "Logic", "Structure"];
+  const list = S.selected ? S.findings.filter(f => f.file === S.selected) : S.findings;
+  let html = S.selected ? '<p class="cat">Findings in ' + esc(S.selected) + " (" + list.length + ')</p>' : "";
+  for (const cat of cats){
+    const inCat = list.filter(f => f.category === cat).sort((a,b) => sevRank(a.severity) - sevRank(b.severity));
+    if (!inCat.length) continue;
+    if (!S.selected) html += '<p class="cat" style="margin:12px 0 6px">' + esc(cat) + "</p>";
+    for (const f of inCat){
+      html += '<div class="finding"><span class="sev ' + f.severity + '">' + f.severity + '</span> <span class="cat">' + esc(f.category) + '</span>' +
+        '<div class="ft">' + esc(f.title) + '</div>' +
+        '<div class="loc" data-file="' + esc(f.file) + '">' + esc(f.file) + (f.line ? ":" + f.line : "") + ' — show on map</div>' +
+        '<div class="fd">' + esc(f.detail) + '</div>';
+      if (S.paid){
+        html += '<div class="fixbox open"><b>Fix steps:</b><ol>' + (f.fix || []).map(s => "<li>" + esc(s) + "</li>").join("") + "</ol></div>";
+      } else {
+        html += '<div class="fixbox locked"><b>🔒 Fix steps locked</b><div class="blur" style="margin-top:5px">1. ──────────────── the affected ────────<br>2. ──────── replace with ────────────────<br>3. Verify by ───────────────────────────</div><div style="margin-top:6px">The exact, ordered fix steps for this issue are in the full report — <b>$299 AI Code Risk Scan</b>.</div></div>';
+      }
+      html += "</div>";
+    }
+  }
+  if (S.selected && !list.length) html += "<p>No findings in this file. Pick another file, or click empty map space to see all findings.</p>";
+  box.innerHTML = html;
+  box.querySelectorAll(".loc").forEach(el => el.addEventListener("click", () => {
+    S.selected = el.getAttribute("data-file"); draw(); renderInspector(); focusNode(S.selected);
+  }));
+}
+function focusNode(path){
+  const n = S.layout.nodes.get(path); if (!n) return;
+  const w = 620, h = 465;
+  S.view = {x: Math.max(0, n.x + n.w / 2 - w / 2), y: Math.max(0, n.y + n.h / 2 - h / 2), w, h};
+  svg.setAttribute("viewBox", S.view.x + " " + S.view.y + " " + S.view.w + " " + S.view.h);
+}
+function setMode(mode){
+  S.mode = mode;
+  $("tabFlow").classList.toggle("active", mode === "flow");
+  $("tabScan").classList.toggle("active", mode === "scan");
+  $("scanPanel").classList.toggle("hidden", mode !== "scan");
+  document.querySelectorAll(".scanLegend").forEach(el => el.classList.toggle("hidden", mode !== "scan"));
+  draw(); renderFindings();
+}
+$("tabFlow").onclick = () => setMode("flow");
+$("tabScan").onclick = () => setMode("scan");
+$("paidToggle").addEventListener("change", e => { S.paid = e.target.checked; renderFindings(); });
+$("scanInput").addEventListener("change", async e => {
+  const file = e.target.files[0]; if (!file) return;
+  try {
+    const data = JSON.parse(await file.text());
+    if (!Array.isArray(data.findings)) throw new Error("No findings array in file");
+    S.findings = data.findings; S.paid = !!data.paid; $("paidToggle").checked = S.paid;
+    setMode("scan"); setStatus("Scan report loaded — " + S.findings.length + " findings pinned to the map.");
+  } catch (err) { setStatus("Could not read that scan report: " + err.message, true); }
+});
+
+/* ============ Loaders ============ */
+$("demoBtn").onclick = () => {
+  S.findings = DEMO_FINDINGS; S.paid = false; $("paidToggle").checked = false;
+  loadRepo("shop-api (demo repo)", DEMO.map(f => ({...f})));
+  renderFindings();
+};
+async function loadGitHub(){
+  const raw = $("ghUrl").value.trim();
+  const m = raw.replace(/^https?:\/\/github\.com\//, "").replace(/\.git$/, "").split("/").filter(Boolean);
+  if (m.length < 2){ setStatus("Paste a GitHub repo URL like https://github.com/owner/repo", true); return; }
+  const [owner, repo] = m; const btn = $("ghLoad"); btn.disabled = true;
+  try {
+    setStatus("Reading " + owner + "/" + repo + " from GitHub…");
+    const meta = await (await fetch("https://api.github.com/repos/" + owner + "/" + repo)).json();
+    if (!meta.default_branch) throw new Error(meta.message || "Repo not found or not public");
+    const tree = await (await fetch("https://api.github.com/repos/" + owner + "/" + repo + "/git/trees/" + meta.default_branch + "?recursive=1")).json();
+    if (!tree.tree) throw new Error(tree.message || "Could not read repo tree");
+    let blobs = tree.tree.filter(t => t.type === "blob" && !SKIP_DIR.test(t.path) && (t.size || 0) < 200000).slice(0, 400);
+    const files = blobs.map(b => ({path: b.path, content: null}));
+    const codeFiles = files.filter(f => isCode(f.path)).slice(0, 220);
+    setStatus("Fetching " + codeFiles.length + " code files to map the flow…");
+    for (let i = 0; i < codeFiles.length; i += 12){
+      const batch = codeFiles.slice(i, i + 12);
+      await Promise.all(batch.map(async f => {
+        try { const r = await fetch("https://raw.githubusercontent.com/" + owner + "/" + repo + "/" + meta.default_branch + "/" + f.path.split("/").map(encodeURIComponent).join("/")); if (r.ok) f.content = await r.text(); } catch (e) {}
+      }));
+      setStatus("Fetching code files… " + Math.min(i + 12, codeFiles.length) + "/" + codeFiles.length);
+    }
+    S.findings = []; S.paid = false; $("paidToggle").checked = false;
+    loadRepo(owner + "/" + repo, files);
+    renderFindings();
+  } catch (err) { setStatus("GitHub load failed: " + err.message + " (public repos only; the free GitHub API also rate-limits — a .zip upload always works.)", true); }
+  btn.disabled = false;
+}
+$("ghLoad").onclick = loadGitHub;
+$("ghUrl").addEventListener("keydown", e => { if (e.key === "Enter") loadGitHub(); });
+
+/* Minimal zip reader — no external library. Parses the central directory;
+   stored entries pass through, deflate entries use the browser's DecompressionStream. */
+async function unzipEntries(file){
+  const buf = await file.arrayBuffer();
+  const dv = new DataView(buf); const u8 = new Uint8Array(buf);
+  let eocd = -1;
+  for (let i = buf.byteLength - 22; i >= Math.max(0, buf.byteLength - 22 - 65536); i--){
+    if (dv.getUint32(i, true) === 0x06054b50){ eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error("That does not look like a valid .zip file");
+  const count = dv.getUint16(eocd + 10, true);
+  let off = dv.getUint32(eocd + 16, true);
+  const out = [];
+  for (let n = 0; n < count; n++){
+    if (dv.getUint32(off, true) !== 0x02014b50) break;
+    const method = dv.getUint16(off + 10, true);
+    const csize = dv.getUint32(off + 20, true);
+    const nameLen = dv.getUint16(off + 28, true);
+    const extraLen = dv.getUint16(off + 30, true);
+    const commentLen = dv.getUint16(off + 32, true);
+    const lho = dv.getUint32(off + 42, true);
+    const name = new TextDecoder().decode(u8.slice(off + 46, off + 46 + nameLen));
+    const lNameLen = dv.getUint16(lho + 26, true);
+    const lExtraLen = dv.getUint16(lho + 28, true);
+    const dataStart = lho + 30 + lNameLen + lExtraLen;
+    out.push({name, method, comp: u8.slice(dataStart, dataStart + csize)});
+    off += 46 + nameLen + extraLen + commentLen;
+  }
+  return out;
+}
+async function entryText(e){
+  if (e.method === 0) return new TextDecoder().decode(e.comp);
+  if (e.method === 8){
+    if (!window.DecompressionStream) throw new Error("This browser is too old to unzip files here — use the GitHub link instead.");
+    const stream = new Blob([e.comp]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+    return new TextDecoder().decode(await new Response(stream).arrayBuffer());
+  }
+  throw new Error("Unsupported zip compression (method " + e.method + ")");
+}
+async function loadZip(file){
+  try {
+    setStatus("Unzipping " + file.name + " locally…");
+    const entries = (await unzipEntries(file)).filter(e => !e.name.endsWith("/") && !SKIP_DIR.test(e.name));
+    let paths = entries.map(e => e.name);
+    const firsts = new Set(paths.map(p => p.split("/")[0]));
+    let prefix = "";
+    if (firsts.size === 1 && paths.every(p => p.includes("/"))) prefix = [...firsts][0] + "/";
+    const byName = new Map(entries.map(e => [e.name, e]));
+    const files = [];
+    for (const p of paths.slice(0, 600)){
+      const clean = p.slice(prefix.length);
+      let content = null;
+      if (isCode(clean) || /\.(json|md|txt|css|html|yml|yaml|toml)$/i.test(clean)){
+        try { const s = await entryText(byName.get(p)); if (s.length < 400000) content = s; } catch (err) { if (!content) throw err; }
+      }
+      files.push({path: clean, content});
+    }
+    S.findings = []; S.paid = false; $("paidToggle").checked = false;
+    loadRepo(file.name.replace(/\.zip$/i, ""), files);
+    renderFindings();
+  } catch (err) { setStatus("Could not read that zip: " + err.message, true); }
+}
+$("zipInput").addEventListener("change", e => { if (e.target.files[0]) loadZip(e.target.files[0]); });
+const drop = $("drop");
+["dragenter", "dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", e => { const f = e.dataTransfer.files[0]; if (f) loadZip(f); });
+
+/* ============ Init: preload the demo so the product is visible instantly ============ */
+S.findings = DEMO_FINDINGS;
+loadRepo("shop-api (demo repo)", DEMO.map(f => ({...f})));
+renderFindings();
+</script>
+</body>
+</html>
