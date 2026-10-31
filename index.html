@@ -84,7 +84,9 @@
   .nodeLbl{font:600 12px -apple-system,"Segoe UI",Roboto,sans-serif;fill:#0f1c2e}
   .grpLbl{font:800 11px -apple-system,"Segoe UI",Roboto,sans-serif;fill:#42556e;letter-spacing:.08em}
   footer{padding:6px 18px 26px;color:var(--ink2);font-size:12.5px}
-  code{background:#eef2f7;border-radius:5px;padding:1px 5px;font-size:12px}
+  code{background:#eef2f7;border-radius:5px;padding:1px 5px;font-size:12px;overflow-wrap:anywhere;word-break:break-word}
+  footer code{white-space:pre-wrap}
+  html,body{overflow-x:hidden}
 </style>
 </head>
 <body>
@@ -135,6 +137,12 @@
     </section>
 
     <div class="stats" id="stats"></div>
+
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px;align-items:center">
+      <button class="btn ghost" id="dmFiles" type="button">🗂 File map</button>
+      <button class="btn ghost" id="dmFlow" type="button">▶ App flow — functions &amp; clicks</button>
+      <span id="dmHint" style="font-size:12.5px;color:var(--ink2)"></span>
+    </div>
 
     <div class="grid">
       <div class="panel">
@@ -193,9 +201,10 @@ const S = {
   externals: new Map(), // file -> [bare imports]
   cycles: new Set(), selected: null,
   findings: [], paid: false, mode: "flow",
+  dataMode: "files", fileData: null, flowData: null,
   view: {x:0, y:0, w:1200, h:560}, layout: {nodes:new Map(), groups:[], W:1200, H:560}
 };
-const CODE_EXT = /\.(js|jsx|ts|tsx|mjs|cjs|py|rb|php|go|java|cs|rs|c|cpp|h|vue|svelte)$/i;
+const CODE_EXT = /\.(js|jsx|ts|tsx|mjs|cjs|py|rb|php|go|java|cs|rs|c|cpp|h|vue|svelte|html|htm)$/i;
 const SKIP_DIR = /(^|\/)(node_modules|\.git|dist|build|vendor|__pycache__|\.next|coverage|out|target)\//;
 const LANG = {js:"JavaScript",jsx:"JavaScript",ts:"TypeScript",tsx:"TypeScript",mjs:"JavaScript",cjs:"JavaScript",py:"Python",rb:"Ruby",php:"PHP",go:"Go",java:"Java",cs:"C#",rs:"Rust",c:"C",cpp:"C++",h:"C/C++",vue:"Vue",svelte:"Svelte",json:"JSON",md:"Markdown",css:"CSS",html:"HTML"};
 
@@ -307,37 +316,211 @@ function buildGraph(files){
   for (const f of files) if (isCode(f.path) && !color.get(f.path)) dfs(f.path, []);
   return {byPath, edges, externals: ext, cycles};
 }
+/* ============ App flow: functions, calls, and user actions inside the code ============ */
+function extractScripts(file){
+  if (!file.content) return "";
+  if (/\.html?$/i.test(file.path)){
+    const blocks = []; const re = /<script\b[^>]*>([\s\S]*?)<\/script>/gi; let m;
+    while ((m = re.exec(file.content))) if (m[1].trim()) blocks.push(m[1]);
+    return blocks.join("\n");
+  }
+  return file.content;
+}
+function balancedBody(text, openIdx){
+  let depth = 0, inS = null, esc = false, inLine = false, inBlock = false;
+  for (let i = openIdx; i < text.length; i++){
+    const c = text[i], n = text[i + 1];
+    if (inLine){ if (c === "\n") inLine = false; continue; }
+    if (inBlock){ if (c === "*" && n === "/"){ inBlock = false; i++; } continue; }
+    if (inS){ if (esc) esc = false; else if (c === "\\") esc = true; else if (c === inS) inS = null; continue; }
+    if (c === "/" && n === "/"){ inLine = true; i++; continue; }
+    if (c === "/" && n === "*"){ inBlock = true; i++; continue; }
+    if (c === "'" || c === '"' || c === "`"){ inS = c; continue; }
+    if (c === "{") depth++;
+    else if (c === "}"){ depth--; if (depth === 0) return {body: text.slice(openIdx + 1, i), end: i}; }
+  }
+  return {body: text.slice(openIdx + 1), end: text.length};
+}
+function findDefs(code){
+  const defs = []; const seen = new Set();
+  const push = (name, body, idx) => { if (name === "$" || name === "jQuery") return; const k = name + "@" + idx; if (!seen.has(k)){ seen.add(k); defs.push({name, body}); } };
+  const pats = [
+    /(?:^|[\s;}])(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*\{/g,
+    /(?:^|[\s;}])(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s+)?(?:function\s*)?\([^)]*\)\s*=>\s*\{/g,
+    /(?:^|[\s;}])(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s+)?function\s*\([^)]*\)\s*\{/g,
+    /(?:^|[\s;}])(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s+)?[A-Za-z_$][\w$]*\s*=>\s*\{/g
+  ];
+  for (const re of pats){ let m; while ((m = re.exec(code))){ const braceIdx = m.index + m[0].length - 1; push(m[1], balancedBody(code, braceIdx).body, m.index); } }
+  const reSE = /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s+)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>\s*([^\n;{]+)/g;
+  let m2; while ((m2 = reSE.exec(code))) if (!defs.some(d => d.name === m2[1])) push(m2[1], m2[2], m2.index);
+  return defs;
+}
+function findPyDefs(code){
+  const defs = []; const lines = code.split("\n"); let cur = null;
+  const flush = () => { if (cur) defs.push({name: cur.name, body: cur.bodyLines.join("\n")}); cur = null; };
+  for (const line of lines){
+    const m = line.match(/^(\s*)def\s+(\w+)\s*\(/);
+    if (m){ flush(); cur = {name: m[2], indent: m[1].length, bodyLines: []}; continue; }
+    if (cur){ if (line.trim() === "" || line.match(/^\s*/)[0].length > cur.indent) cur.bodyLines.push(line); else flush(); }
+  }
+  flush(); return defs;
+}
+function findCycles(ids, edges){
+  const adj = new Map(); edges.forEach(e => { if (!adj.has(e.from)) adj.set(e.from, []); adj.get(e.from).push(e.to); });
+  const color = new Map(); const cycles = new Set();
+  function dfs(u, stack){
+    color.set(u, 1); stack.push(u);
+    for (const v of adj.get(u) || []){
+      if (color.get(v) === 1){ const i = stack.indexOf(v); stack.slice(i).forEach(n => cycles.add(n)); }
+      else if (!color.get(v)) dfs(v, stack);
+    }
+    stack.pop(); color.set(u, 2);
+  }
+  for (const id of ids) if (!color.get(id)) dfs(id, []);
+  return cycles;
+}
+function buildFlow(files){
+  const nodes = new Map(); const edges = []; const seenE = new Set();
+  const addEdge = (a, b) => { if (a === b || !nodes.has(a) || !nodes.has(b)) return; const k = a + ">" + b; if (!seenE.has(k)){ seenE.add(k); edges.push({from: a, to: b}); } };
+  const nodeId = (file, name) => "flow:" + file + "#" + name;
+  const perFile = [];
+  for (const f of files){
+    const code = extractScripts(f); if (!code) continue;
+    const defs = /\.py$/i.test(f.path) ? findPyDefs(code) : findDefs(code);
+    perFile.push({file: f, code, defs});
+    for (const d of defs){
+      const id = nodeId(f.path, d.name);
+      if (!nodes.has(id)) nodes.set(id, {id, label: d.name + "()", group: f.path, kind: "fn", src: f.path});
+      d._id = id;
+    }
+  }
+  const resolve = (fromFile, name) => {
+    const local = nodeId(fromFile, name); if (nodes.has(local)) return local;
+    for (const pf of perFile){ const id = nodeId(pf.file.path, name); if (nodes.has(id)) return id; }
+    return null;
+  };
+  const callsIn = (fromFile, fromId, body) => {
+    if (!body) return;
+    const re = /([A-Za-z_$][\w$]*)\s*\(/g; let m;
+    while ((m = re.exec(body))){ const t = resolve(fromFile, m[1]); if (t) addEdge(fromId, t); }
+  };
+  for (const pf of perFile) for (const d of pf.defs) callsIn(pf.file.path, d._id, d.body);
+  // user actions: addEventListener, on* assignments, inline HTML handlers
+  for (const pf of perFile){
+    const code = pf.code, f = pf.file; let uiCount = 0; let m;
+    const varLabel = new Map();
+    const reVar = /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:\$|document\.getElementById)\(\s*['"]([^'"]+)['"]\s*\)/g;
+    while ((m = reVar.exec(code))) varLabel.set(m[1], "#" + m[2]);
+    const reVar2 = /,\s*([A-Za-z_$][\w$]*)\s*=\s*(?:\$|document\.getElementById)\(\s*['"]([^'"]+)['"]\s*\)/g;
+    while ((m = reVar2.exec(code))) varLabel.set(m[1], "#" + m[2]);
+    const reQS = /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*document\.querySelector(?:All)?\(\s*['"]([^'"]+)['"]\s*\)/g;
+    while ((m = reQS.exec(code))) varLabel.set(m[1], m[2]);
+    const reCE = /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*document\.createElement\(\s*['"]([^'"]+)['"]\s*\)/g;
+    while ((m = reCE.exec(code))) varLabel.set(m[1], "<" + m[2] + ">");
+    const mkUI = (label, event, bodyText, refName) => {
+      const id = nodeId(f.path, "ui" + (++uiCount));
+      nodes.set(id, {id, label: "🖱 " + label + " · " + event, group: f.path, kind: "ui", src: f.path});
+      if (refName){ const t = resolve(f.path, refName); if (t) addEdge(id, t); }
+      else if (bodyText) callsIn(f.path, id, bodyText);
+    };
+    const handlerBody = (startIdx, rest) => {
+      const hm = rest.match(/^\s*(?:async\s+)?(?:function\s*)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>\s*\{/) || rest.match(/^\s*function\s*\([^)]*\)\s*\{/);
+      if (hm) return {body: balancedBody(code, startIdx + hm.index + hm[0].length - 1).body};
+      const rm = rest.match(/^\s*([A-Za-z_$][\w$]*)/);
+      return rm ? {ref: rm[1]} : {};
+    };
+    const reAE = /([A-Za-z_$][\w$]*(?:\([^)]*\))?(?:\.[A-Za-z_$][\w$]*)?)\.addEventListener\(\s*['"]([\w-]+)['"]\s*,\s*/g;
+    while ((m = reAE.exec(code))){
+      const target = m[1], event = m[2];
+      let label;
+      const dollar = target.match(/\$\(\s*['"]([^'"]+)['"]\s*\)/);
+      const baseVar = (target.match(/^[A-Za-z_$][\w$]*/) || [target])[0];
+      if (dollar) label = "#" + dollar[1];
+      else if (varLabel.has(baseVar)) label = varLabel.get(baseVar);
+      else if (baseVar === "document") label = "page";
+      else if (baseVar === "window") label = "window";
+      else {
+        const look = code.slice(Math.max(0, m.index - 140), m.index).match(/querySelectorAll\(\s*['"]([^'"]+)['"]\s*\)(?!.*querySelectorAll)/);
+        label = look ? look[1] + " (each)" : target;
+      }
+      const h = handlerBody(reAE.lastIndex, code.slice(reAE.lastIndex));
+      mkUI(label, event, h.body || null, h.ref || null);
+    }
+    const reOn = /([A-Za-z_$][\w$]*)\.on([\w]+)\s*=\s*/g;
+    while ((m = reOn.exec(code))){
+      const h = handlerBody(reOn.lastIndex, code.slice(reOn.lastIndex));
+      mkUI(varLabel.get(m[1]) || m[1], m[2], h.body || null, h.ref || null);
+    }
+    if (/\.html?$/i.test(f.path) && f.content){
+      const tagRe = /<[a-zA-Z][^>]*>/g; let tm;
+      while ((tm = tagRe.exec(f.content))){
+        const tag = tm[0];
+        const on = tag.match(/\son(\w+)\s*=\s*"([^"]*)"/) || tag.match(/\son(\w+)\s*=\s*'([^']*)'/);
+        if (!on) continue;
+        const idm = tag.match(/\sid\s*=\s*"([^"]+)"/);
+        const tagName = (tag.match(/^<(\w+)/) || [])[1] || "element";
+        mkUI(idm ? "#" + idm[1] : "<" + tagName + ">", on[1], on[2], null);
+      }
+    }
+  }
+  const pfiles = [...nodes.values()].map(n => ({path: n.id, content: null, loc: 0, lang: n.kind === "ui" ? "User action" : "Function", _label: n.label, _group: n.group, _kind: n.kind, _src: n.src}));
+  return {files: pfiles, edges};
+}
+function applyDataset(){
+  const d = S.dataMode === "flow" ? S.flowData : S.fileData;
+  if (!d) return;
+  S.files = d.files; S.byPath = new Map(d.files.map(f => [f.path, f])); S.edges = d.edges; S.externals = d.externals || new Map(); S.cycles = d.cycles; S.selected = null;
+  $("dmFiles").classList.toggle("dark", S.dataMode === "files");
+  $("dmFiles").classList.toggle("ghost", S.dataMode !== "files");
+  $("dmFlow").classList.toggle("dark", S.dataMode === "flow");
+  $("dmFlow").classList.toggle("ghost", S.dataMode !== "flow");
+  $("dmHint").textContent = S.dataMode === "flow" ? "How the app actually runs: user actions → the functions they trigger → the functions those call." : "How the files import and depend on each other.";
+  $("diagramTitle").textContent = (S.mode === "scan" ? "QA Scan — issue map · " : S.dataMode === "flow" ? "App flow · " : "Code flow map · ") + (S.repoName || "");
+  layout(); renderStats(); draw(); renderInspector();
+}
 function loadRepo(name, files){
   files = files.filter(f => !SKIP_DIR.test(f.path)).slice(0, 600);
   files.forEach(f => { f.loc = f.content ? f.content.split("\n").length : 0; f.lang = LANG[extOf(f.path)] || (extOf(f.path) || "file").toUpperCase(); });
   const g = buildGraph(files);
-  S.repoName = name; S.files = files; S.byPath = g.byPath; S.edges = g.edges; S.externals = g.externals; S.cycles = g.cycles; S.selected = null;
-  layout(); renderStats(); draw(); renderInspector();
-  setStatus("Loaded " + name + " — " + files.length + " files, " + g.edges.length + " internal connections mapped.");
+  S.fileData = {files, edges: g.edges, externals: g.externals, cycles: g.cycles};
+  const fl = buildFlow(files);
+  S.flowData = {files: fl.files, edges: fl.edges, externals: new Map(), cycles: findCycles(fl.files.map(f => f.path), fl.edges)};
+  S.repoName = name;
+  S.dataMode = (g.edges.length === 0 && fl.edges.length > 0) ? "flow" : "files";
+  applyDataset();
+  setStatus("Loaded " + name + " — " + files.length + " files, " + g.edges.length + " file connections, " + fl.edges.length + " app-flow connections mapped." + (S.dataMode === "flow" ? " Showing the app flow (functions & user actions) because the files themselves don't import each other." : ""));
 }
+
 
 /* ============ Layout & drawing ============ */
 const NODE_W = 176, NODE_H = 36, GAP = 10, PAD = 14, TITLE_H = 22;
 function layout(){
   const groups = new Map();
   for (const f of S.files){
-    const g = dirOf(f.path) || "(root)";
+    const g = f._group || dirOf(f.path) || "(root)";
     if (!groups.has(g)) groups.set(g, []);
     groups.get(g).push(f);
   }
   const glist = [...groups.entries()].map(([name, fs]) => {
-    fs.sort((a,b) => a.path.localeCompare(b.path));
+    fs.sort((a,b) => {
+      if (a._kind || b._kind){
+        const ka = a._kind === "ui" ? 0 : 1, kb = b._kind === "ui" ? 0 : 1;
+        if (ka !== kb) return ka - kb;
+        return (a._label || a.path).localeCompare(b._label || b.path);
+      }
+      return a.path.localeCompare(b.path);
+    });
     const h = TITLE_H + PAD + fs.length * (NODE_H + GAP) + PAD - GAP;
-    return {name, files: fs, w: NODE_W + PAD * 2, h};
+    return {name, files: fs, w: (S.dataMode === "flow" ? 224 : NODE_W) + PAD * 2, h};
   }).sort((a,b) => b.files.length - a.files.length);
-  const MAXW = 1240; let x = 16, y = 16, rowH = 0; const nodes = new Map();
+  const MAXW = 1240; let x = 16, y = 16, rowH = 0, usedW = 0; const nodes = new Map();
   for (const g of glist){
     if (x + g.w > MAXW && x > 16){ x = 16; y += rowH + 26; rowH = 0; }
-    g.x = x; g.y = y; rowH = Math.max(rowH, g.h);
-    g.files.forEach((f, i) => nodes.set(f.path, {x: g.x + PAD, y: g.y + TITLE_H + PAD + i * (NODE_H + GAP), w: NODE_W, h: NODE_H}));
+    g.x = x; g.y = y; rowH = Math.max(rowH, g.h); usedW = Math.max(usedW, x + g.w);
+    g.files.forEach((f, i) => nodes.set(f.path, {x: g.x + PAD, y: g.y + TITLE_H + PAD + i * (NODE_H + GAP), w: g.w - PAD * 2, h: NODE_H}));
     x += g.w + 26;
   }
-  S.layout = {nodes, groups: glist, W: MAXW + 32, H: y + rowH + 32};
+  S.layout = {nodes, groups: glist, W: usedW + 32, H: y + rowH + 32};
   S.view = {x: 0, y: 0, w: S.layout.W, h: Math.max(560, S.layout.H)};
 }
 const $ = id => document.getElementById(id);
@@ -345,7 +528,8 @@ const svg = $("diagram");
 function sevRank(s){ return {critical:0, high:1, medium:2, low:3}[s] ?? 4; }
 function worstSevFor(path){
   let w = null;
-  for (const f of S.findings) if (f.file === path && (w === null || sevRank(f.severity) < sevRank(w))) w = f.severity;
+  const srcPath = (S.byPath.get(path) || {})._src;
+  for (const f of S.findings) if ((f.file === path || f.file === srcPath) && (w === null || sevRank(f.severity) < sevRank(w))) w = f.severity;
   return w;
 }
 function draw(){
@@ -399,11 +583,11 @@ function draw(){
     g.appendChild(r);
     const dot = document.createElementNS(NS, "circle");
     dot.setAttribute("cx", n.x + 13); dot.setAttribute("cy", n.y + n.h / 2); dot.setAttribute("r", 4.5);
-    dot.setAttribute("fill", isCode(f.path) ? "#2e90fa" : "#98a2b3");
+    dot.setAttribute("fill", f._kind === "ui" ? "#00a676" : isCode(f.path) ? "#2e90fa" : "#98a2b3");
     g.appendChild(dot);
     const t = document.createElementNS(NS, "text");
     t.setAttribute("x", n.x + 24); t.setAttribute("y", n.y + n.h / 2 + 4); t.setAttribute("class", "nodeLbl");
-    const lbl = baseOf(f.path); t.textContent = lbl.length > 21 ? lbl.slice(0, 20) + "…" : lbl;
+    const lbl = f._label || baseOf(f.path); const maxL = f._label ? 28 : 21; t.textContent = lbl.length > maxL ? lbl.slice(0, maxL - 1) + "…" : lbl;
     g.appendChild(t);
     if (S.mode === "scan"){
       const w = worstSevFor(f.path);
@@ -413,7 +597,7 @@ function draw(){
         c.setAttribute("fill", {critical:"#d92d20", high:"#f79009", medium:"#2e90fa", low:"#667085"}[w]);
         c.setAttribute("stroke", "#fff"); c.setAttribute("stroke-width", 2);
         g.appendChild(c);
-        const cnt = S.findings.filter(x => x.file === f.path).length;
+        const cnt = S.findings.filter(x => x.file === f.path || x.file === f._src).length;
         const ct = document.createElementNS(NS, "text");
         ct.setAttribute("x", n.x + n.w - 4); ct.setAttribute("y", n.y + 6); ct.setAttribute("text-anchor", "middle");
         ct.setAttribute("style", "font:800 10px sans-serif;fill:#fff");
@@ -424,7 +608,7 @@ function draw(){
     g.addEventListener("click", ev => { ev.stopPropagation(); S.selected = f.path; draw(); renderInspector(); if (S.mode === "scan") renderFindings(); });
     svg.appendChild(g);
   }
-  $("diagramTitle").textContent = (S.mode === "scan" ? "QA Scan — issue map · " : "Code flow map · ") + (S.repoName || "");
+  $("diagramTitle").textContent = (S.mode === "scan" ? "QA Scan — issue map · " : S.dataMode === "flow" ? "App flow · " : "Code flow map · ") + (S.repoName || "");
 }
 /* pan & zoom */
 (function(){
@@ -437,9 +621,22 @@ function draw(){
     S.view.x = drag.v.x - dx; S.view.y = drag.v.y - dy;
     svg.setAttribute("viewBox", S.view.x + " " + S.view.y + " " + S.view.w + " " + S.view.h);
   });
-  svg.addEventListener("pointerup", () => drag = null);
+  svg.addEventListener("pointerup", e => {
+    const moved = drag && (Math.abs(e.clientX - drag.x) > 6 || Math.abs(e.clientY - drag.y) > 6);
+    drag = null;
+    if (moved) return;
+    // Tap/click selection by hit-test: pointer capture retargets real click
+    // events to the <svg>, so node <g> click handlers never fire in Chromium.
+    const rect = svg.getBoundingClientRect();
+    const px = S.view.x + (e.clientX - rect.left) * S.view.w / rect.width;
+    const py = S.view.y + (e.clientY - rect.top) * S.view.h / rect.height;
+    let hit = null;
+    for (const f of S.files){ const n = S.layout.nodes.get(f.path); if (n && px >= n.x && px <= n.x + n.w && py >= n.y && py <= n.y + n.h){ hit = f.path; break; } }
+    S.selected = hit;
+    draw(); renderInspector(); if (S.mode === "scan") renderFindings();
+  });
   svg.addEventListener("wheel", e => { e.preventDefault(); zoom(e.deltaY < 0 ? 0.88 : 1.14); }, {passive: false});
-  svg.addEventListener("click", () => { S.selected = null; draw(); renderInspector(); if (S.mode === "scan") renderFindings(); });
+
 })();
 function zoom(f){
   const cx = S.view.x + S.view.w / 2, cy = S.view.y + S.view.h / 2;
@@ -453,6 +650,16 @@ $("zFit").onclick = () => { S.view = {x: 0, y: 0, w: S.layout.W, h: Math.max(560
 
 /* ============ Stats & inspector ============ */
 function renderStats(){
+  if (S.dataMode === "flow"){
+    const fns = S.files.filter(f => f._kind === "fn").length;
+    const uis = S.files.filter(f => f._kind === "ui").length;
+    const srcs = new Set(S.files.map(f => f._src)).size;
+    $("stats").innerHTML =
+      stat2(fns, "functions mapped") + stat2(uis, "user actions wired") + stat2(S.edges.length, "call / trigger connections") +
+      stat2(srcs, "source files scanned") + stat2(S.cycles.size, "functions in circular calls", S.cycles.size ? "warn" : "");
+    function stat2(v, l, cls){ return '<div class="stat ' + (cls || "") + '"><b>' + v + "</b>" + l + "</div>"; }
+    return;
+  }
   const code = S.files.filter(f => isCode(f.path));
   const loc = S.files.reduce((a, f) => a + (f.loc || 0), 0);
   const langs = {};
@@ -471,6 +678,18 @@ function renderInspector(){
   const b = $("inspectBody");
   if (!S.selected){ b.innerHTML = "Click a file in the diagram to see what it imports, what depends on it, and any scan findings pinned to it."; return; }
   const f = S.byPath.get(S.selected); if (!f) return;
+  if (S.dataMode === "flow"){
+    const disp = id => ((S.byPath.get(id) || {})._label || id);
+    const outsF = S.edges.filter(e => e.from === f.path).map(e => e.to);
+    const insF = S.edges.filter(e => e.to === f.path).map(e => e.from);
+    b.innerHTML =
+      '<p class="kv"><b>' + esc(f._label || f.path) + '</b></p>' +
+      '<p class="kv"><span>' + (f._kind === "ui" ? "User action" : "Function") + ' in:</span> ' + esc(f._src || "") + '</p>' +
+      (f._kind === "ui" ? '<p class="kv">This is where a person (or the page itself) starts the flow.</p>' : "") +
+      '<p class="kv"><span>' + (f._kind === "ui" ? "Triggers (" : "Calls (") + outsF.length + '):</span></p><div class="filelist">' + (outsF.length ? outsF.map(disp).map(esc).join("<br>") : "—") + '</div>' +
+      '<p class="kv" style="margin-top:8px"><span>Called / triggered from (' + insF.length + '):</span></p><div class="filelist">' + (insF.length ? insF.map(disp).map(esc).join("<br>") : "—") + '</div>';
+    return;
+  }
   const outs = S.edges.filter(e => e.from === f.path).map(e => e.to);
   const ins = S.edges.filter(e => e.to === f.path).map(e => e.from);
   const exts = S.externals.get(f.path) || [];
@@ -765,6 +984,9 @@ const drop = $("drop");
 ["dragenter", "dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
 ["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
 drop.addEventListener("drop", e => { const f = e.dataTransfer.files[0]; if (f) loadZip(f); });
+
+$("dmFiles").onclick = () => { S.dataMode = "files"; applyDataset(); };
+$("dmFlow").onclick = () => { S.dataMode = "flow"; applyDataset(); };
 
 /* ============ Init: preload the demo so the product is visible instantly ============ */
 S.findings = DEMO_FINDINGS;
