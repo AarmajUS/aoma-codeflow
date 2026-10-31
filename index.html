@@ -76,6 +76,11 @@
   .scanbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
   .switch{font-size:13.5px;color:var(--ink2);display:flex;gap:7px;align-items:center}
   .hidden{display:none!important}
+  .repoItem{display:flex;gap:8px;align-items:center;width:100%;text-align:left;background:#fff;border:0;border-bottom:1px solid var(--line);padding:10px 12px;cursor:pointer;font:inherit;font-size:14px;color:var(--ink)}
+  .repoItem:hover{background:#eef4ff}
+  .repoItem .badge{font-size:10.5px;font-weight:800;letter-spacing:.06em;padding:2px 7px;border-radius:99px;background:#dcfae6;color:#067647}
+  .repoItem .badge.priv{background:#fef0c7;color:#93370d}
+  .repoItem .meta{margin-left:auto;font-size:12px;color:var(--ink2);white-space:nowrap}
   .nodeLbl{font:600 12px -apple-system,"Segoe UI",Roboto,sans-serif;fill:#0f1c2e}
   .grpLbl{font:800 11px -apple-system,"Segoe UI",Roboto,sans-serif;fill:#42556e;letter-spacing:.08em}
   footer{padding:6px 18px 26px;color:var(--ink2);font-size:12.5px}
@@ -99,9 +104,31 @@
   <div class="wrap">
     <section class="loader" id="loaderBox">
       <div class="row">
-        <input type="text" id="ghUrl" placeholder="Paste a public GitHub repo — e.g. https://github.com/owner/repo">
+        <input type="text" id="ghUrl" placeholder="Paste a GitHub repo — e.g. https://github.com/owner/repo (public, or private with a token below)">
         <button class="btn" id="ghLoad">Load repo</button>
         <button class="btn ghost" id="demoBtn">Try the demo repo</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <input type="password" id="ghToken" placeholder="Private repo? Paste a read-only GitHub token (fine-grained, Contents: read-only) — memory only, never stored" autocomplete="off">
+      </div>
+      <div style="font-size:12.5px;color:var(--ink2);margin-top:6px">No token needed for public repos. For a private repo: <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">create a fine-grained token</a> with access to just that repo and <b>Contents: Read-only</b> — or skip tokens entirely and drop a .zip of the repo below. The token is used only for requests from your browser to api.github.com and is never saved.</div>
+      <div style="border-top:1px solid var(--line);margin-top:12px;padding-top:12px">
+        <div class="row">
+          <button class="btn dark" id="ghConnect">Connect GitHub securely</button>
+          <button class="btn ghost hidden" id="ghDisconnect">Disconnect</button>
+          <span id="ghUser" style="font-size:13.5px;color:var(--ink2);align-self:center"></span>
+        </div>
+        <div style="font-size:12.5px;color:var(--ink2);margin-top:6px">Connect with GitHub's own device flow: you approve on github.com, no password or secret is ever typed here, and the access token lives only in this tab's memory — reload the page and it's gone. GitHub's <b>repo</b> scope is read+write by GitHub's design; CodeFlow only ever reads. A tiny sign-in forwarder relays GitHub's handshake (GitHub blocks direct browser calls to it) and stores nothing.</div>
+        <div id="deviceBox" class="hidden" style="margin-top:10px;background:#eef4ff;border:1px solid #b9d2ff;border-radius:10px;padding:12px">
+          <div style="font-size:13px;color:var(--ink2)">Enter this code on GitHub to approve the connection:</div>
+          <div id="userCode" style="font-size:28px;font-weight:800;letter-spacing:.18em;margin:4px 0">····-····</div>
+          <a id="verifyLink" href="https://github.com/login/device" target="_blank" rel="noopener" style="display:inline-block;background:var(--brand);color:#fff;padding:10px 16px;border-radius:9px;font-weight:700;text-decoration:none;font-size:14px">Open GitHub approval page</a>
+          <div id="deviceStatus" style="font-size:13px;margin-top:8px;color:var(--ink2)">Waiting for you to approve on GitHub…</div>
+        </div>
+        <div id="repoPicker" class="hidden" style="margin-top:10px">
+          <div style="font-weight:700;font-size:14px;margin-bottom:6px">Your GitHub repos — tap one to map it</div>
+          <div id="repoList" style="max-height:264px;overflow:auto;border:1px solid var(--line);border-radius:9px"></div>
+        </div>
       </div>
       <div class="drop" id="drop">…or drop a repo <b>.zip</b> here, or <label for="zipInput" style="color:var(--brand);font-weight:700;cursor:pointer">browse to upload</label><input type="file" id="zipInput" accept=".zip" class="hidden"></div>
       <div id="status">Demo repo is preloaded so you can see exactly how it works. Your uploads are parsed locally — nothing is sent to a server.</div>
@@ -534,16 +561,26 @@ $("demoBtn").onclick = () => {
   loadRepo("shop-api (demo repo)", DEMO.map(f => ({...f})));
   renderFindings();
 };
-async function loadGitHub(){
-  const raw = $("ghUrl").value.trim();
-  const m = raw.replace(/^https?:\/\/github\.com\//, "").replace(/\.git$/, "").split("/").filter(Boolean);
-  if (m.length < 2){ setStatus("Paste a GitHub repo URL like https://github.com/owner/repo", true); return; }
-  const [owner, repo] = m; const btn = $("ghLoad"); btn.disabled = true;
+/* ---- GitHub loading (public, PAT, or secure Connect token) ---- */
+let GH_TOKEN = null; // OAuth token from secure Connect — page memory only, never stored
+const GH_CLIENT_ID = "Ov23liAmHxnl4XqBgTPy"; // public identifier
+const AUTH_PROXY = location.hostname.endsWith("vercel.app") ? "" : "https://aoma-codeflow-aarmaj.vercel.app";
+function effectiveToken(){ return GH_TOKEN || $("ghToken").value.trim() || null; }
+function ghHeaders(tok, raw){
+  const h = { "Accept": raw ? "application/vnd.github.raw+json" : "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" };
+  if (tok) h["Authorization"] = "Bearer " + tok;
+  return h;
+}
+async function loadGitHubRepo(owner, repo){
+  const btn = $("ghLoad"); btn.disabled = true;
+  const tok = effectiveToken();
   try {
     setStatus("Reading " + owner + "/" + repo + " from GitHub…");
-    const meta = await (await fetch("https://api.github.com/repos/" + owner + "/" + repo)).json();
-    if (!meta.default_branch) throw new Error(meta.message || "Repo not found or not public");
-    const tree = await (await fetch("https://api.github.com/repos/" + owner + "/" + repo + "/git/trees/" + meta.default_branch + "?recursive=1")).json();
+    const metaRes = await fetch("https://api.github.com/repos/" + owner + "/" + repo, {headers: ghHeaders(tok)});
+    const meta = await metaRes.json();
+    if (!meta.default_branch) throw new Error((meta.message || "Repo not found") + (metaRes.status === 404 && !tok ? " — if this repo is private, use Connect GitHub above or paste a read-only token." : ""));
+    const treeRes = await fetch("https://api.github.com/repos/" + owner + "/" + repo + "/git/trees/" + meta.default_branch + "?recursive=1", {headers: ghHeaders(tok)});
+    const tree = await treeRes.json();
     if (!tree.tree) throw new Error(tree.message || "Could not read repo tree");
     let blobs = tree.tree.filter(t => t.type === "blob" && !SKIP_DIR.test(t.path) && (t.size || 0) < 200000).slice(0, 400);
     const files = blobs.map(b => ({path: b.path, content: null}));
@@ -552,17 +589,113 @@ async function loadGitHub(){
     for (let i = 0; i < codeFiles.length; i += 12){
       const batch = codeFiles.slice(i, i + 12);
       await Promise.all(batch.map(async f => {
-        try { const r = await fetch("https://raw.githubusercontent.com/" + owner + "/" + repo + "/" + meta.default_branch + "/" + f.path.split("/").map(encodeURIComponent).join("/")); if (r.ok) f.content = await r.text(); } catch (e) {}
+        try {
+          let r;
+          if (tok){
+            r = await fetch("https://api.github.com/repos/" + owner + "/" + repo + "/contents/" + f.path.split("/").map(encodeURIComponent).join("/") + "?ref=" + encodeURIComponent(meta.default_branch), {headers: ghHeaders(tok, true)});
+          } else {
+            r = await fetch("https://raw.githubusercontent.com/" + owner + "/" + repo + "/" + meta.default_branch + "/" + f.path.split("/").map(encodeURIComponent).join("/"));
+          }
+          if (r.ok) f.content = await r.text();
+        } catch (e) {}
       }));
       setStatus("Fetching code files… " + Math.min(i + 12, codeFiles.length) + "/" + codeFiles.length);
     }
     S.findings = []; S.paid = false; $("paidToggle").checked = false;
     loadRepo(owner + "/" + repo, files);
     renderFindings();
-  } catch (err) { setStatus("GitHub load failed: " + err.message + " (public repos only; the free GitHub API also rate-limits — a .zip upload always works.)", true); }
+  } catch (err) { setStatus("GitHub load failed: " + err.message + " (the free GitHub API also rate-limits — a .zip upload always works.)", true); }
   btn.disabled = false;
 }
+async function loadGitHub(){
+  const raw = $("ghUrl").value.trim();
+  const m = raw.replace(/^https?:\/\/github\.com\//, "").replace(/\.git$/, "").split("/").filter(Boolean);
+  if (m.length < 2){ setStatus("Paste a GitHub repo URL like https://github.com/owner/repo", true); return; }
+  await loadGitHubRepo(m[0], m[1]);
+}
 $("ghLoad").onclick = loadGitHub;
+
+/* ---- Secure Connect: GitHub Device Flow via the tiny auth forwarder ---- */
+let devicePoll = null;
+function stopDevicePoll(){ if (devicePoll){ clearTimeout(devicePoll); devicePoll = null; } }
+async function proxyPost(path, payload){
+  const r = await fetch(AUTH_PROXY + path, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload || {})});
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok && !data.error && !data.device_code && !data.access_token) throw new Error("Sign-in forwarder returned HTTP " + r.status);
+  return data;
+}
+async function startConnect(){
+  stopDevicePoll();
+  const btn = $("ghConnect"); btn.disabled = true;
+  try {
+    setStatus("Contacting GitHub for a sign-in code…");
+    const d = await proxyPost("/api/device-code", {});
+    if (!d.device_code) throw new Error(d.error_description || d.error || "GitHub did not return a device code");
+    $("userCode").textContent = d.user_code;
+    $("verifyLink").href = d.verification_uri || "https://github.com/login/device";
+    $("deviceBox").classList.remove("hidden");
+    $("deviceStatus").textContent = "Waiting for you to approve on GitHub… (code expires in " + Math.round((d.expires_in || 900) / 60) + " min)";
+    setStatus("Approve the connection on GitHub with code " + d.user_code + " — this page picks it up automatically.");
+    const deadline = Date.now() + (d.expires_in || 900) * 1000;
+    let interval = Math.max(5, d.interval || 5);
+    const poll = async () => {
+      if (Date.now() > deadline){ $("deviceStatus").textContent = "That code expired — click Connect again for a fresh one."; btn.disabled = false; return; }
+      try {
+        const t = await proxyPost("/api/oauth-token?device_code=" + encodeURIComponent(d.device_code), {device_code: d.device_code});
+        if (t.access_token){
+          GH_TOKEN = t.access_token;
+          $("deviceBox").classList.add("hidden");
+          btn.disabled = false;
+          await afterConnect();
+          return;
+        }
+        if (t.error === "slow_down") interval += 5;
+        else if (t.error === "access_denied"){ $("deviceStatus").textContent = "Approval was denied on GitHub — nothing was connected."; btn.disabled = false; return; }
+        else if (t.error === "expired_token"){ $("deviceStatus").textContent = "That code expired — click Connect again for a fresh one."; btn.disabled = false; return; }
+        else if (t.error && t.error !== "authorization_pending"){ $("deviceStatus").textContent = "GitHub said: " + (t.error_description || t.error); btn.disabled = false; return; }
+      } catch (e) { /* transient forwarder/network hiccup — keep polling until deadline */ }
+      devicePoll = setTimeout(poll, interval * 1000);
+    };
+    devicePoll = setTimeout(poll, interval * 1000);
+  } catch (err) {
+    setStatus("Connect failed: " + err.message, true);
+    btn.disabled = false;
+  }
+}
+async function afterConnect(){
+  try {
+    const meRes = await fetch("https://api.github.com/user", {headers: ghHeaders(GH_TOKEN)});
+    const me = await meRes.json();
+    $("ghUser").textContent = me.login ? ("Connected as " + me.login) : "Connected";
+    $("ghConnect").classList.add("hidden");
+    $("ghDisconnect").classList.remove("hidden");
+    setStatus("Connected to GitHub as " + (me.login || "you") + " — pick a repo below to map it.");
+    await loadMyRepos();
+  } catch (e) { setStatus("Connected, but listing your repos failed: " + e.message, true); }
+}
+async function loadMyRepos(){
+  const res = await fetch("https://api.github.com/user/repos?affiliation=owner,collaborator&per_page=100&sort=updated", {headers: ghHeaders(GH_TOKEN)});
+  const repos = await res.json();
+  if (!Array.isArray(repos)) throw new Error(repos.message || "repo list failed");
+  const list = $("repoList"); list.innerHTML = "";
+  for (const r of repos){
+    const b = document.createElement("button");
+    b.className = "repoItem"; b.type = "button";
+    b.innerHTML = "<span><b>" + esc(r.full_name) + "</b>" + (r.description ? '<br><span style="font-size:12.5px;color:var(--ink2)">' + esc(r.description) + "</span>" : "") + '</span><span class="meta">' + (r.updated_at ? r.updated_at.slice(0, 10) : "") + '</span><span class="badge' + (r.private ? " priv" : "") + '">' + (r.private ? "PRIVATE" : "PUBLIC") + "</span>";
+    b.onclick = () => { $("ghUrl").value = r.html_url; loadGitHubRepo(r.owner.login, r.name); window.scrollTo({top: 0, behavior: "smooth"}); };
+    list.appendChild(b);
+  }
+  $("repoPicker").classList.remove("hidden");
+  if (!repos.length) list.innerHTML = '<div style="padding:12px;font-size:13.5px;color:var(--ink2)">No repos found on this account.</div>';
+}
+$("ghConnect").onclick = startConnect;
+$("ghDisconnect").onclick = () => {
+  stopDevicePoll(); GH_TOKEN = null;
+  $("repoPicker").classList.add("hidden"); $("deviceBox").classList.add("hidden");
+  $("ghUser").textContent = "";
+  $("ghConnect").classList.remove("hidden"); $("ghDisconnect").classList.add("hidden");
+  setStatus("Disconnected — the token is cleared from this page's memory.");
+};
 $("ghUrl").addEventListener("keydown", e => { if (e.key === "Enter") loadGitHub(); });
 
 /* Minimal zip reader — no external library. Parses the central directory;
