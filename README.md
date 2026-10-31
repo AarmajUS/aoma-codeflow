@@ -24,3 +24,16 @@ page's memory; after connecting, the page lists the user's repos (private
 badged) and loads the tapped repo through the authenticated contents API.
 A read-only personal access token pasted into the token field is the fallback
 path and is wired into the same loader.
+
+## Internal — scan report format (NOT shown on the public page)
+
+Stage 2 delivery produces a findings JSON this page renders (via the
+"Load scan report" control in the QA Scan panel):
+
+```json
+{"repo":"name","paid":true,"findings":[{"severity":"critical|high|medium|low","category":"Security|Code & concurrency|Logic|Structure","file":"src/app.js","line":12,"title":"…","detail":"…","fix":["step 1","step 2"]}]}
+```
+
+The `paid` flag controls whether fix steps render unlocked. Keep this format
+in this README only — it must never appear on the visitor-facing page
+(Rafiq flagged the old footer 2026-10-31; removed same day).
