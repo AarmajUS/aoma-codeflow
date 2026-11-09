@@ -57,9 +57,9 @@ h2.track{font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(
 #sheetBody th,#sheetBody td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}
 #sheetBody a{color:var(--acc)}
 #closeSheet{background:var(--panel);border:1px solid var(--line);color:var(--ink);border-radius:99px;padding:7px 14px;cursor:pointer;flex:none}
-</style></head><body>
+</style><style>.orb-home-cv{width:34px;height:34px;filter:drop-shadow(0 0 8px rgba(56,189,248,.45))}</style></head><body>
 <div class="wrap">
-<header><h1>TestGen <span>Academy</span> — Card Player</h1>
+<header><a href="https://aomaai.com/" aria-label="AomaAI home" style="display:inline-block;margin-bottom:4px"><canvas class="orb-home-cv" width="80" height="80" aria-hidden="true"></canvas></a><h1>TestGen <span>Academy</span> — Card Player</h1>
 <p>One card at a time. Learn a little, check it with a quick quiz, unlock the next module. Prefer reading? Every module's <b>full tutorial</b> is one tap away (📖) and opens on the side — your card stays exactly where you left it. Learn whichever way works for you.</p>
 <div class="bar"><i id="barFill"></i></div><div class="barlab" id="barLab"></div></header>
 <div id="home"></div>
@@ -152,4 +152,36 @@ $("closeSheet").addEventListener("click",()=>$("drawer").classList.remove("open"
 $("drawer").addEventListener("click",e=>{if(e.target.id==="drawer")$("drawer").classList.remove("open");});
 renderHome();
 const _h=(location.hash||"").slice(1); if(DATA.modules[_h]) openModule(_h);
-</script></body></html>
+</script><script>
+(function(){
+  var cvs=document.querySelectorAll('.orb-home-cv');if(!cvs.length)return;
+  var reduced=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function pal(t){var c1=[56,189,248],c2=[167,139,250],c3=[52,245,163],a,b,u;if(t<.5){a=c1;b=c2;u=t*2;}else{a=c2;b=c3;u=(t-.5)*2;}return[Math.round(a[0]+(b[0]-a[0])*u),Math.round(a[1]+(b[1]-a[1])*u),Math.round(a[2]+(b[2]-a[2])*u)];}
+  cvs.forEach(function(cv){
+    var ctx=cv.getContext('2d');var S=80,cx=40,cy=40,R=13,FL=3.4;
+    var N=110,GA=Math.PI*(3-Math.sqrt(5)),pts=[],j;
+    for(j=0;j<N;j++){var y=1-(j/(N-1))*2,r=Math.sqrt(Math.max(0,1-y*y)),th=GA*j;pts.push({x:Math.cos(th)*r,y:y,z:Math.sin(th)*r,t:(y+1)/2});}
+    function proj(x,y,z){var s=FL/(FL+z);return[cx+x*s*R,cy+y*s*R,s];}
+    function rot(x,y,z,ry,rx){var c=Math.cos(ry),s=Math.sin(ry),x1=x*c-z*s,z1=x*s+z*c;var c2=Math.cos(rx),s2=Math.sin(rx),y1=y*c2-z1*s2,z2=y*s2+z1*c2;return[x1,y1,z2];}
+    function draw(t){
+      ctx.clearRect(0,0,S,S);
+      var ry=t*.9,rx=.4;
+      var g=ctx.createRadialGradient(cx,cy,0,cx,cy,R*1.6);g.addColorStop(0,'rgba(140,220,255,.35)');g.addColorStop(1,'rgba(80,150,255,0)');ctx.fillStyle=g;ctx.beginPath();ctx.arc(cx,cy,R*1.6,0,7);ctx.fill();
+      var d=[];pts.forEach(function(p){var v=rot(p.x,p.y,p.z,ry,rx);var pr=proj(v[0],v[1],v[2]);d.push({x:pr[0],y:pr[1],s:pr[2],z:v[2],t:p.t});});
+      d.sort(function(a,b){return b.z-a.z;});
+      d.forEach(function(p){var dep=(p.s-.72)/.55;var col=pal(p.t);ctx.fillStyle='rgba('+col[0]+','+col[1]+','+col[2]+','+(.18+Math.max(0,dep)*.62)+')';ctx.beginPath();ctx.arc(p.x,p.y,Math.max(.7,.9+Math.max(0,dep)*1.1),0,7);ctx.fill();});
+      ctx.strokeStyle='rgba(125,180,255,.4)';ctx.lineWidth=1;ctx.beginPath();
+      for(var k=0;k<=60;k++){var an=k/60*Math.PI*2;var v2=rot(Math.cos(an)*1.5,Math.sin(an)*1.5*Math.sin(.95),Math.sin(an)*1.5*Math.cos(.95),ry*.9,rx*.8);var pr2=proj(v2[0],v2[1],v2[2]);if(k===0)ctx.moveTo(pr2[0],pr2[1]);else ctx.lineTo(pr2[0],pr2[1]);}
+      ctx.stroke();
+      var sa=t*1.4;var sv=rot(Math.cos(sa)*1.5,Math.sin(sa)*1.5*Math.sin(.95),Math.sin(sa)*1.5*Math.cos(.95),ry*.9,rx*.8);var sp=proj(sv[0],sv[1],sv[2]);
+      ctx.fillStyle='rgba(52,245,163,.95)';ctx.shadowColor='rgba(52,245,163,1)';ctx.shadowBlur=6;ctx.beginPath();ctx.arc(sp[0],sp[1],2.2,0,7);ctx.fill();ctx.shadowBlur=0;
+    }
+    if(reduced){draw(.6);return;}
+    var run=true,t0=performance.now();
+    document.addEventListener('visibilitychange',function(){run=!document.hidden;if(run){t0=performance.now();requestAnimationFrame(loop);}});
+    function loop(now){if(!run)return;draw((now-t0)/1000+.6);requestAnimationFrame(loop);}
+    requestAnimationFrame(loop);
+  });
+})();
+</script>
+</body></html>
